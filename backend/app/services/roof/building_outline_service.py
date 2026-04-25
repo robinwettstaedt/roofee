@@ -43,9 +43,16 @@ class BuildingOutlineService:
         with Image.open(image_path) as image:
             width, height = image.size
 
+        return self._detect_outlines(str(image_path), width=width, height=height)
+
+    def detect_outlines_from_image(self, image: Any) -> list[RoofOutline]:
+        height, width = image.shape[:2]
+        return self._detect_outlines(image, width=width, height=height)
+
+    def _detect_outlines(self, image: Any, *, width: int, height: int) -> list[RoofOutline]:
         model = self._load_model()
         results = model.predict(
-            str(image_path),
+            image,
             conf=self.confidence_threshold,
             iou=self.iou_threshold,
             max_det=self.max_detections,

@@ -15,7 +15,8 @@ flowchart TD
     D --> E["✅ Backend resolves location and fetches house data"]
     E --> F["✅ Backend fetches location-based solar and weather inputs"]
     F --> G["✅ Backend analyzes the roof"]
-    G --> H["Backend checks where panels can fit"]
+    G --> R["✅ Backend registers satellite roof to 3D top-down render"]
+    R --> H["Backend checks where panels can fit"]
     H --> I["Backend creates good, better, and best options"]
     I --> J["Backend creates the BOM"]
     J --> K["Backend prepares the roof visual"]
@@ -25,7 +26,7 @@ flowchart TD
     classDef backend fill:#dcfce7,stroke:#16a34a,color:#111827
 
     class A,B,C,L frontend
-    class D,E,F,G,H,I,J,K backend
+    class D,E,F,G,R,H,I,J,K backend
 ```
 
 1. **Find the home**
@@ -245,6 +246,71 @@ flowchart TD
 
    The RID runtime is intentionally separated from the backend Python process. Configure `ROOFEE_RID_RUNTIME_PYTHON` to point at a Python 3.10 environment with the RID dependencies installed.
 
+   Roof-to-3D registration contract:
+
+   After the frontend has selected the exact satellite roof outline IDs and loaded a GLB, it generates a deterministic top-down orthographic render of the model. The render must be independent of the user's current orbit camera. Send the PNG and render metadata to:
+
+   ```http
+   POST /api/roof/registration
+   Content-Type: multipart/form-data
+   ```
+
+   ```json
+   {
+     "satellite_image_url": "/api/house-assets/{asset_id}/overhead.png",
+     "selected_roof_outline_ids": ["roof-003"],
+     "top_down_render_metadata": {
+       "render_width": 1024,
+       "render_height": 1024,
+       "orthographic_world_bounds": {
+         "x_min": -12.0,
+         "x_max": 12.0,
+         "z_min": -12.0,
+         "z_max": 12.0,
+         "y_min": 0.0,
+         "y_max": 8.0
+       },
+       "model_orientation": {
+         "up_axis": "y",
+         "camera_direction": [0, -1, 0],
+         "camera_up": [0, 0, -1]
+       }
+     }
+   }
+   ```
+
+   The backend revalidates the selected satellite roof, matches ORB features between the satellite image and top-down render, retries with AKAZE when ORB cannot produce a reliable match, estimates a similarity transform with RANSAC, and maps the selected satellite roof polygon into render pixels:
+
+   ```json
+   {
+     "status": "registered",
+     "selected_roof": {
+       "...": "same focused roof geometry returned by /api/roof/selection"
+     },
+     "transform": {
+       "matrix": [[1.05, -0.12, 41.2], [0.12, 1.05, 18.7]],
+       "scale": 1.057,
+       "rotation_degrees": 6.52,
+       "translation_pixels": [41.2, 18.7],
+       "algorithm": "orb"
+     },
+     "mapped_roof_polygon_pixels": [[92, 104], [310, 120], [292, 284], [80, 260]],
+     "quality": {
+       "algorithm": "orb",
+       "confidence": 0.91,
+       "satellite_keypoints": 812,
+       "render_keypoints": 645,
+       "good_matches": 140,
+       "inliers": 86,
+       "inlier_ratio": 0.614,
+       "mean_reprojection_error_pixels": 2.4
+     },
+     "warnings": []
+   }
+   ```
+
+   The satellite roof polygon remains the source of truth. The returned render-pixel polygon is an alignment product for visualization and for the later pixel-to-model placement step; V1 does not use shear or homography.
+
 3. **Upload optional 3D model**
    - The user may optionally upload a 3D model at the start.
    - The model can improve or override address-derived roof geometry.
@@ -263,22 +329,30 @@ flowchart TD
 
    ✅ Implemented: V1 detects candidate building/roof outlines from the overhead image, validates a focused roof selection, and runs selected-roof obstruction detection through an isolated RID U-Net runtime. Full usable-area subtraction for panel placement remains part of the solar layout step.
 
-6. **Find possible solar layouts**
+6. **Register the satellite roof to the 3D model**
+   - The frontend renders the loaded GLB from a fixed top-down orthographic camera.
+   - The backend aligns the satellite image to that render with translation, rotation, and uniform scale only.
+   - The selected satellite roof polygon remains the source of truth and is mapped into 3D-render pixels.
+   - Low-confidence registration is reported with warnings instead of silently feeding panel placement.
+
+   ✅ Implemented: V1 exposes `POST /api/roof/registration`, recovers a satellite-to-render similarity transform with ORB/AKAZE + RANSAC, rejects unreliable transforms, and returns the selected roof polygon mapped onto the deterministic top-down render.
+
+7. **Find possible solar layouts**
    - The backend looks at the available solar modules in the material catalog.
    - It checks which modules can physically fit on the usable roof area.
    - This step decides realistic panel counts and roof-plane placement options before any bill of materials is created.
 
-7. **Size the energy system**
+8. **Size the energy system**
    - The backend estimates sensible `good`, `better`, and `best` system options.
    - It considers electricity demand, roof capacity, expected PV yield, battery usefulness, heat pump needs, EV plans, and user preferences.
    - Estimated or missing inputs are reported clearly so the seller knows what should be confirmed with the customer.
 
-8. **Create the bill of materials**
+9. **Create the bill of materials**
    - The backend converts the selected system sizes into contractor-ready line items.
    - The BOM uses only components from the fixed material catalog extracted from the provided datasets.
    - The BOM includes core equipment, accessories, mounting, services, and installation-related items.
 
-9. **Prepare the visual result**
+10. **Prepare the visual result**
    - The backend maps the selected panel layout back onto the best available roof geometry.
    - The frontend can then show the seller and customer where the proposed panels would actually go.
 
@@ -320,6 +394,13 @@ The backend is organized around service responsibilities rather than one large c
   - Calls the isolated RID U-Net runtime outside the backend Python process.
   - Maps obstruction polygons from crop pixels back to full-image pixels.
   - Filters ignored classes, low-confidence detections, tiny polygons, and detections outside the selected roof.
+
+- `RoofRegistrationService`
+  - Revalidates selected satellite roof outline IDs.
+  - Matches satellite and top-down model-render features with ORB, then AKAZE as fallback.
+  - Estimates only a similarity transform with RANSAC.
+  - Maps the selected satellite roof polygon into deterministic render-pixel space.
+  - Reports transform quality, confidence, and warnings for low-feature or unreliable alignments.
 
 - `SolarLayoutService`
   - Takes usable roof geometry and candidate PV modules from the catalog.
@@ -369,6 +450,7 @@ app/services/
   roof/
     roof_analysis_service.py
     obstruction_service.py
+    registration_service.py
     solar_layout_service.py
   sizing/
     energy_sizing_service.py
