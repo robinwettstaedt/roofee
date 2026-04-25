@@ -8,7 +8,15 @@ from fastapi.testclient import TestClient
 from pydantic import ValidationError
 
 from app.main import app
-from app.models.recommendation import RecommendationRequest, SolarWeatherMetadata
+from app.models.recommendation import (
+    Google3DTilesData,
+    HouseData,
+    LatLng,
+    RecommendationRequest,
+    SolarBuildingData,
+    SolarWeatherMetadata,
+)
+from app.services.house_data_service import get_house_data_service
 from app.services.pvgis_service import get_pvgis_service
 
 
@@ -48,9 +56,29 @@ class FailingPvgisService:
         raise HTTPException(status_code=502, detail="PVGIS request timed out.")
 
 
+class FakeHouseDataService:
+    def fetch_house_data(self, latitude: float, longitude: float) -> HouseData:
+        center = LatLng(latitude=latitude, longitude=longitude)
+        return HouseData(
+            status="fetched",
+            provider="google",
+            location=center,
+            solar_building=SolarBuildingData(center=center, imagery_quality="HIGH"),
+            overhead_image_url="/api/house-assets/test-asset/overhead.png",
+            tiles_3d=Google3DTilesData(root_url="/api/google-3d-tiles/root.json", origin=center),
+            warnings=[],
+        )
+
+
+class FailingHouseDataService:
+    def fetch_house_data(self, latitude: float, longitude: float) -> HouseData:
+        raise HTTPException(status_code=503, detail="Google Maps API key is not configured.")
+
+
 @pytest.fixture
 def client() -> TestClient:
     app.dependency_overrides[get_pvgis_service] = lambda: FakePvgisService()
+    app.dependency_overrides[get_house_data_service] = lambda: FakeHouseDataService()
     try:
         yield TestClient(app)
     finally:
@@ -174,6 +202,9 @@ def test_recommendation_route_accepts_multipart_without_model_file(client: TestC
     assert payload["solar_weather"]["latitude"] == 52.52
     assert payload["solar_weather"]["longitude"] == 13.405
     assert len(payload["solar_weather"]["monthly"]) == 12
+    assert payload["house_data"]["provider"] == "google"
+    assert payload["house_data"]["overhead_image_url"] == "/api/house-assets/test-asset/overhead.png"
+    assert payload["house_data"]["tiles_3d"]["root_url"] == "/api/google-3d-tiles/root.json"
     assert {"field": "load_profile", "value": "H0", "reason": "defaulted"} in payload["estimated_inputs"]
     assert {"field": "shading_level", "value": "unknown", "reason": "not_provided"} in payload["estimated_inputs"]
 
@@ -228,6 +259,7 @@ def test_recommendation_route_returns_422_for_invalid_coordinates(client: TestCl
 
 def test_recommendation_route_returns_502_when_pvgis_fails() -> None:
     app.dependency_overrides[get_pvgis_service] = lambda: FailingPvgisService()
+    app.dependency_overrides[get_house_data_service] = lambda: FakeHouseDataService()
     try:
         client = TestClient(app)
         response = client.post("/api/recommendations", files=multipart_request(valid_recommendation_payload()))
@@ -236,6 +268,19 @@ def test_recommendation_route_returns_502_when_pvgis_fails() -> None:
 
     assert response.status_code == 502
     assert response.json()["detail"] == "PVGIS request timed out."
+
+
+def test_recommendation_route_returns_503_when_house_data_is_not_configured() -> None:
+    app.dependency_overrides[get_pvgis_service] = lambda: FakePvgisService()
+    app.dependency_overrides[get_house_data_service] = lambda: FailingHouseDataService()
+    try:
+        client = TestClient(app)
+        response = client.post("/api/recommendations", files=multipart_request(valid_recommendation_payload()))
+    finally:
+        app.dependency_overrides.clear()
+
+    assert response.status_code == 503
+    assert response.json()["detail"] == "Google Maps API key is not configured."
 
 
 def test_recommendation_route_returns_400_for_invalid_json(client: TestClient) -> None:

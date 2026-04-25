@@ -113,6 +113,60 @@ class SolarWeatherMetadata(BaseModel):
     monthly: list[MonthlySolarWeather]
 
 
+class LatLng(BaseModel):
+    latitude: float = Field(ge=-90, le=90)
+    longitude: float = Field(ge=-180, le=180)
+
+
+class LatLngBox(BaseModel):
+    southwest: LatLng
+    northeast: LatLng
+
+
+class GoogleSolarDate(BaseModel):
+    year: int | None = None
+    month: int | None = None
+    day: int | None = None
+
+
+class SolarRoofSegment(BaseModel):
+    center: LatLng | None = None
+    bounding_box: LatLngBox | None = None
+    pitch_degrees: float | None = None
+    azimuth_degrees: float | None = None
+    plane_height_at_center_meters: float | None = None
+    area_meters2: float | None = None
+    sunshine_quantiles: list[float] = Field(default_factory=list)
+
+
+class SolarBuildingData(BaseModel):
+    name: str | None = None
+    center: LatLng
+    bounding_box: LatLngBox | None = None
+    imagery_date: GoogleSolarDate | None = None
+    imagery_processed_date: GoogleSolarDate | None = None
+    imagery_quality: str | None = None
+    region_code: str | None = None
+    postal_code: str | None = None
+    administrative_area: str | None = None
+    roof_segments: list[SolarRoofSegment] = Field(default_factory=list)
+
+
+class Google3DTilesData(BaseModel):
+    root_url: str
+    origin: LatLng
+
+
+class HouseData(BaseModel):
+    status: str
+    provider: str
+    location: LatLng
+    solar_building: SolarBuildingData
+    overhead_image_url: str
+    tiles_3d: Google3DTilesData
+    warnings: list[str] = Field(default_factory=list)
+
+
 class RecommendationValidationResponse(BaseModel):
     status: str
     input: RecommendationRequest
@@ -122,3 +176,4 @@ class RecommendationValidationResponse(BaseModel):
     warnings: list[str]
     model_file: ModelFileValidation
     solar_weather: SolarWeatherMetadata | None = None
+    house_data: HouseData | None = None
