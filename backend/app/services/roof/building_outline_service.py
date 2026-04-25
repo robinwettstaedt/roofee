@@ -5,7 +5,7 @@ from typing import Any
 
 from PIL import Image
 
-from app.models.roof import RoofOutline
+from app.models.roof import BoundingBoxPixels, RoofOutline
 
 
 DEFAULT_BUILDING_OUTLINE_MODEL_ID = "keremberke/yolov8m-building-segmentation"
@@ -98,8 +98,10 @@ class BuildingOutlineService:
 
             confidence = confidences[index] if index < len(confidences) else None
             outline = RoofOutline(
+                id=f"detected-roof-{index + 1}",
                 source="huggingface_yolov8",
                 model_id=self.model_id,
+                bounding_box_pixels=self._bounding_box(polygon),
                 polygon_pixels=polygon,
                 area_pixels=area_pixels,
                 confidence=confidence,
@@ -165,6 +167,16 @@ class BuildingOutlineService:
             next_point = polygon[(index + 1) % len(polygon)]
             area += point[0] * next_point[1] - next_point[0] * point[1]
         return round(abs(area) / 2.0, 2)
+
+    def _bounding_box(self, polygon: list[list[int]]) -> BoundingBoxPixels:
+        x_values = [point[0] for point in polygon]
+        y_values = [point[1] for point in polygon]
+        return BoundingBoxPixels(
+            x_min=min(x_values),
+            y_min=min(y_values),
+            x_max=max(x_values),
+            y_max=max(y_values),
+        )
 
     def _centroid_distance(
         self,
