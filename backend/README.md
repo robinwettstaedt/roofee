@@ -14,7 +14,7 @@ flowchart TD
     C --> D["✅ Backend checks what is present, missing, or estimated"]
     D --> E["✅ Backend resolves location and fetches house data"]
     E --> F["✅ Backend fetches location-based solar and weather inputs"]
-    F --> G["Backend analyzes the roof"]
+    F --> G["✅ Backend analyzes the roof"]
     G --> H["Backend checks where panels can fit"]
     H --> I["Backend creates good, better, and best options"]
     I --> J["Backend creates the BOM"]
@@ -198,6 +198,53 @@ flowchart TD
    }
    ```
 
+   Roof obstruction analysis contract:
+
+   After the frontend has selected the exact roof outline IDs, call the obstruction route with the same payload shape:
+
+   ```http
+   POST /api/roof/obstructions
+   Content-Type: application/json
+   ```
+
+   ```json
+   {
+     "satellite_image_url": "/api/house-assets/{asset_id}/overhead.png",
+     "selected_roof_outline_ids": ["roof-003"]
+   }
+   ```
+
+   The backend revalidates the selected roof, crops the selected roof area from the overhead image, calls the isolated RID U-Net runtime, maps returned obstruction polygons back to full-image pixels, and returns the focused roof plus obstruction polygons:
+
+   ```json
+   {
+     "status": "analyzed",
+     "selected_roof": {
+       "...": "same focused roof geometry returned by /api/roof/selection"
+     },
+     "obstructions": [
+       {
+         "id": "obstruction-001",
+         "class_name": "chimney",
+         "polygon_pixels": [[100, 120], [115, 122], [113, 140]],
+         "bounding_box_pixels": {
+           "x_min": 100,
+           "y_min": 120,
+           "x_max": 115,
+           "y_max": 140
+         },
+         "area_pixels": 247,
+         "confidence": 0.834,
+         "source": "rid_unet",
+         "model_id": "rid_unet_resnet34_best"
+       }
+     ],
+     "warnings": []
+   }
+   ```
+
+   The RID runtime is intentionally separated from the backend Python process. Configure `ROOFEE_RID_RUNTIME_PYTHON` to point at a Python 3.10 environment with the RID dependencies installed.
+
 3. **Upload optional 3D model**
    - The user may optionally upload a 3D model at the start.
    - The model can improve or override address-derived roof geometry.
@@ -213,6 +260,8 @@ flowchart TD
 5. **Understand the roof**
    - The backend identifies usable roof surfaces.
    - It accounts for roof direction, tilt, available area, and known obstructions such as chimneys, skylights, windows, and unusable roof sections.
+
+   ✅ Implemented: V1 detects candidate building/roof outlines from the overhead image, validates a focused roof selection, and runs selected-roof obstruction detection through an isolated RID U-Net runtime. Full usable-area subtraction for panel placement remains part of the solar layout step.
 
 6. **Find possible solar layouts**
    - The backend looks at the available solar modules in the material catalog.
@@ -262,8 +311,15 @@ The backend is organized around service responsibilities rather than one large c
   - Converts user-friendly units into backend units.
 
 - `RoofAnalysisService`
-  - Determines roof planes, tilt, azimuth, usable area, and obstructions.
-  - Produces the roof facts needed for panel placement and sizing.
+  - Detects address-derived building/roof outlines.
+  - Validates selected roof outline IDs and returns focused roof geometry.
+  - Produces the selected roof facts needed for obstruction detection, panel placement, and sizing.
+
+- `RoofObstructionService`
+  - Crops the selected roof area from the overhead image.
+  - Calls the isolated RID U-Net runtime outside the backend Python process.
+  - Maps obstruction polygons from crop pixels back to full-image pixels.
+  - Filters ignored classes, low-confidence detections, tiny polygons, and detections outside the selected roof.
 
 - `SolarLayoutService`
   - Takes usable roof geometry and candidate PV modules from the catalog.

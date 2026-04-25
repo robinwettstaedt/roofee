@@ -17,6 +17,11 @@ class Settings(BaseSettings):
     house_data_cache_dir: Path = Path(".roofee_cache/house_data")
     google_solar_radius_meters: float = 50.0
     google_solar_pixel_size_meters: float = 0.25
+    rid_runtime_python: str = "python3.10"
+    rid_runtime_timeout_seconds: float = 60.0
+    roof_obstruction_crop_padding_pixels: int = 8
+    roof_obstruction_min_confidence: float = 0.5
+    roof_obstruction_min_area_pixels: float = 50.0
 
     model_config = SettingsConfigDict(env_file=(".env", "../.env"), env_prefix="ROOFEE_")
 

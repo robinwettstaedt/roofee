@@ -28,7 +28,7 @@ class RoofAnalysisService:
         roof_planes = [segment.model_dump(mode="json") for segment in house_data.solar_building.roof_segments]
         warnings: list[str] = []
 
-        asset_id = self._asset_id_from_overhead_url(house_data.overhead_image_url)
+        asset_id = self.asset_id_from_overhead_url(house_data.overhead_image_url)
         if asset_id is None:
             return RoofAnalysis(
                 status=RoofAnalysisStatus.SKIPPED,
@@ -65,7 +65,7 @@ class RoofAnalysisService:
             warnings=warnings,
         )
 
-    def _asset_id_from_overhead_url(self, overhead_image_url: str) -> str | None:
+    def asset_id_from_overhead_url(self, overhead_image_url: str) -> str | None:
         parts = overhead_image_url.strip("/").split("/")
         if len(parts) != 4:
             return None
@@ -78,7 +78,7 @@ class RoofAnalysisService:
         request: RoofSelectionRequest,
         house_data_service: HouseDataService,
     ) -> RoofSelectionResponse:
-        asset_id = self._asset_id_from_overhead_url(request.satellite_image_url)
+        asset_id = self.asset_id_from_overhead_url(request.satellite_image_url)
         if asset_id is None:
             raise HTTPException(status_code=400, detail="Invalid satellite image URL.")
 
