@@ -121,6 +121,7 @@ body {
   box-shadow: 0 0 0 3px color-mix(in oklch, var(--color-signal) 18%, transparent);
 }
 
+
 /* Grain effect — kept as a no-op shell for legacy usage; intentionally blank now */
 .grain::after { content: none; }
 

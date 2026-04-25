@@ -8,6 +8,14 @@ const HEATING: { value: Profile["heating"]; label: string }[] = [
   { value: "electric", label: "Electric" },
   { value: "heatpump", label: "Heat pump" },
   { value: "none", label: "None" },
+  { value: "unknown", label: "Not sure" },
+];
+
+const HOUSE_SIZES: { sqm: number; label: string }[] = [
+  { sqm: 75, label: "< 90 m²" },
+  { sqm: 110, label: "90–130 m²" },
+  { sqm: 155, label: "130–180 m²" },
+  { sqm: 200, label: "> 180 m²" },
 ];
 
 export function SecondaryInputs({
@@ -21,6 +29,14 @@ export function SecondaryInputs({
   onHasEv,
   evKmPerYear,
   onEvKmPerYear,
+  houseSizeSqm,
+  onHouseSizeSqm,
+  hasSolar,
+  onHasSolar,
+  hasStorage,
+  onHasStorage,
+  hasWallbox,
+  onHasWallbox,
 }: {
   monthlyBillEur: number;
   onMonthlyBillEur: (v: number) => void;
@@ -32,6 +48,14 @@ export function SecondaryInputs({
   onHasEv: (v: boolean) => void;
   evKmPerYear: number;
   onEvKmPerYear: (v: number) => void;
+  houseSizeSqm: number;
+  onHouseSizeSqm: (v: number) => void;
+  hasSolar: boolean;
+  onHasSolar: (v: boolean) => void;
+  hasStorage: boolean;
+  onHasStorage: (v: boolean) => void;
+  hasWallbox: boolean;
+  onHasWallbox: (v: boolean) => void;
 }) {
   return (
     <div className="flex flex-col gap-7">
@@ -77,6 +101,29 @@ export function SecondaryInputs({
         </div>
       </Field>
 
+      <Field label="Roughly how big is the home?">
+        <div className="flex flex-wrap gap-2">
+          {HOUSE_SIZES.map((s) => {
+            const active = houseSizeSqm === s.sqm;
+            return (
+              <button
+                key={s.sqm}
+                type="button"
+                aria-pressed={active}
+                onClick={() => onHouseSizeSqm(s.sqm)}
+                className={`rounded-full border px-4 py-1.5 text-[13px] num transition ${
+                  active
+                    ? "border-ink bg-ink text-paper"
+                    : "border-ink/20 text-ink-soft hover:border-ink hover:text-ink"
+                }`}
+              >
+                {s.label}
+              </button>
+            );
+          })}
+        </div>
+      </Field>
+
       <Field label="Heating">
         <div className="flex flex-wrap gap-2">
           {HEATING.map((h) => {
@@ -97,6 +144,29 @@ export function SecondaryInputs({
               </button>
             );
           })}
+        </div>
+      </Field>
+
+      <Field
+        label="What does the home already have?"
+        hint="Select any that apply — leave blank if none."
+      >
+        <div className="flex flex-wrap gap-2">
+          <SystemPill
+            label="Solar panels"
+            active={hasSolar}
+            onToggle={() => onHasSolar(!hasSolar)}
+          />
+          <SystemPill
+            label="Battery"
+            active={hasStorage}
+            onToggle={() => onHasStorage(!hasStorage)}
+          />
+          <SystemPill
+            label="EV charger"
+            active={hasWallbox}
+            onToggle={() => onHasWallbox(!hasWallbox)}
+          />
         </div>
       </Field>
 
@@ -152,16 +222,55 @@ export function SecondaryInputs({
   );
 }
 
+function SystemPill({
+  label,
+  active,
+  onToggle,
+}: {
+  label: string;
+  active: boolean;
+  onToggle: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      aria-pressed={active}
+      onClick={onToggle}
+      className={`group inline-flex items-center gap-2 rounded-full border px-4 py-1.5 text-[13px] transition ${
+        active
+          ? "border-signal bg-signal/10 text-ink"
+          : "border-ink/20 text-ink-soft hover:border-ink hover:text-ink"
+      }`}
+    >
+      <span
+        aria-hidden
+        className={`grid h-4 w-4 place-items-center rounded-sm border text-[11px] leading-none transition ${
+          active
+            ? "border-signal bg-signal text-paper"
+            : "border-ink/30 bg-paper text-transparent"
+        }`}
+      >
+        ✓
+      </span>
+      {label}
+    </button>
+  );
+}
+
 function Field({
   label,
+  hint,
   children,
 }: {
   label: string;
+  hint?: string;
   children: React.ReactNode;
 }) {
   return (
     <div>
-      <p className="mb-3 text-[13px] font-medium text-ink">{label}</p>
+      <p className="mb-1 text-[13px] font-medium text-ink">{label}</p>
+      {hint && <p className="mb-3 text-[12px] text-dust">{hint}</p>}
+      {!hint && <div className="mb-3" />}
       {children}
     </div>
   );
