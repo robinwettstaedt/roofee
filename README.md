@@ -34,3 +34,21 @@ Frontend: `http://localhost:3000`
 Backend: `http://localhost:8000`
 
 API docs: `http://localhost:8000/docs`
+
+## What's where
+
+```
+frontend/
+  src/app/                 Next.js App Router entry + global styles + mock /api/design,/api/refine
+  src/components/          AddressIntake, Designer, BomSidebar, Scene/House/RoofPlacedPanels (3D), …
+  src/lib/                 catalog, format helpers, client-side variant synthesizer
+  src/types/api.ts         Shared API contract (Profile, Design, DesignResponse, BomLine, …)
+  public/house.glb         Demo 3D model used by Scene
+backend/
+  app/api/routes/          FastAPI routers (health, catalog, recommendations)
+  app/services/            project input validation, component catalog, PVGIS client
+  app/models/              Pydantic request/response models
+  data/                    Local data the catalog service consumes
+```
+
+The frontend currently produces the BOM via mock routes in `frontend/src/app/api/` — see [CLAUDE.md](CLAUDE.md) for the seam where the real backend will plug in.

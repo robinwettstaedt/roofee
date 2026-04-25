@@ -67,9 +67,20 @@ Finally, the selected solar panel construction should be drawn onto the exact fr
 
 ## Current Stack
 
-- Frontend: Next.js, TypeScript
-- Backend: Python, FastAPI
+- Frontend: Next.js (App Router), TypeScript, Tailwind v4, three.js + react-three-fiber + drei.
+- Backend: Python, FastAPI.
 - Backend API docs should be available from the local FastAPI server at `/docs`.
+
+## Frontend State (as of initial commit)
+
+- Two-screen flow lives in [frontend/src/components/DesignerApp.tsx](frontend/src/components/DesignerApp.tsx):
+  - **Intake** ([AddressIntake.tsx](frontend/src/components/AddressIntake.tsx)) — single centered address field, then a household-details step.
+  - **Designer** ([Designer.tsx](frontend/src/components/Designer.tsx)) — split canvas with the 3D scene on the left and a BOM sidebar on the right.
+- 3D rendering: [Scene.tsx](frontend/src/components/Scene.tsx) + [House.tsx](frontend/src/components/House.tsx) + [RoofPlacedPanels.tsx](frontend/src/components/RoofPlacedPanels.tsx). Live tuner overlay in [PlacementControls.tsx](frontend/src/components/PlacementControls.tsx) (gated by the `Tune` toggle, persists to `localStorage` under `roofee.placement.v1`).
+- **`/api/design` and `/api/refine` are frontend mocks** (in `frontend/src/app/api/`) — they synthesize the BOM, metrics, and panel positions client-side. The real FastAPI backend currently exposes `/api/recommendations` (validation + PVGIS) and does NOT yet feed the design flow. Don't delete the mock routes until the backend grows a real `POST /api/design` returning a full `DesignResponse`.
+- API contract types live in [frontend/src/types/api.ts](frontend/src/types/api.ts) — shared between the mock routes and the UI; treat as the source of truth.
+- The three package "variants" shown by the [VariantTabs](frontend/src/components/VariantTabs.tsx) are derived **client-side** in [frontend/src/lib/variants.ts](frontend/src/lib/variants.ts) by ±25% scaling. Backend should eventually return `packages[]` and replace this.
+- Theme: `paper` / `ink` / `signal` (orange) / `amber`. Geist + Geist Mono only — no serif. Tokens declared in [frontend/src/app/globals.css](frontend/src/app/globals.css) via `@theme inline`.
 
 ## Development Notes
 

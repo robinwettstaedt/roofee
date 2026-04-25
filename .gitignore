@@ -232,3 +232,20 @@ pnpm-debug.log*
 
 # Local env files
 .env*.local
+
+# Frontend lib/ shouldn't be ignored even though the Python rule above
+# matches any directory named "lib". The Python rule targets venv-style
+# `lib/` dirs at the repo root or inside Python projects, not source code.
+!/frontend/src/lib
+!/frontend/src/lib/**
+
+# Tooling caches
+.playwright-mcp/
+
+# Debug screenshots from 3D rendering tuning sessions
+/after-gen.png
+/attempt*.png
+/baseline.png
+/camera-*.png
+/final*.png
+/overlay.png
