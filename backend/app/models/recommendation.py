@@ -3,6 +3,8 @@ from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from app.models.roof import RoofAnalysis
+
 
 class RecommendationGoal(StrEnum):
     BALANCED = "balanced"
@@ -177,3 +179,4 @@ class RecommendationValidationResponse(BaseModel):
     model_file: ModelFileValidation
     solar_weather: SolarWeatherMetadata | None = None
     house_data: HouseData | None = None
+    roof_analysis: RoofAnalysis | None = None
