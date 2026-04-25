@@ -4,6 +4,7 @@ from app.models.recommendation import RecommendationValidationResponse
 from app.services.house_data_service import HouseDataService, get_house_data_service
 from app.services.project_input_service import ProjectInputService, get_project_input_service
 from app.services.pvgis_service import PvgisService, get_pvgis_service
+from app.services.roof.roof_analysis_service import RoofAnalysisService, get_roof_analysis_service
 
 router = APIRouter()
 
@@ -15,6 +16,7 @@ def create_recommendation(
     project_input_service: ProjectInputService = Depends(get_project_input_service),
     pvgis_service: PvgisService = Depends(get_pvgis_service),
     house_data_service: HouseDataService = Depends(get_house_data_service),
+    roof_analysis_service: RoofAnalysisService = Depends(get_roof_analysis_service),
 ) -> RecommendationValidationResponse:
     response = project_input_service.validate_recommendation_input(request, model_file)
     response.house_data = house_data_service.fetch_house_data(
@@ -25,4 +27,5 @@ def create_recommendation(
         response.input.latitude,
         response.input.longitude,
     )
+    response.roof_analysis = roof_analysis_service.analyze_house(response.house_data, house_data_service)
     return response

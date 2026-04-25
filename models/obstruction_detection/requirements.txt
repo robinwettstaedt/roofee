@@ -1,0 +1,15 @@
+# Inference-only dependencies for the RID U-Net obstruction detector.
+#
+# IMPORTANT: TensorFlow 2.10 is the last version with native Windows GPU
+# support. Pinning here. PyPI yanked the TF 2.10 wheels for Python 3.9/3.10,
+# so the pip line below MAY need to be replaced with conda on Windows:
+#
+#     conda install -c conda-forge tensorflow=2.10 cudatoolkit=11.2 cudnn=8.1.0
+#
+# Linux pip path works as long as Python is 3.7-3.10. TF 2.10 does NOT
+# support Python 3.11 — adjust runtime accordingly, or use ONNX export if
+# you need to run inference under 3.11+.
+tensorflow==2.10.0
+segmentation-models==1.0.1
+numpy<2
+opencv-python-headless>=4.9
