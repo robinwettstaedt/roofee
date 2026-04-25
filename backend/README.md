@@ -11,7 +11,7 @@ flowchart TD
     A["User enters project address"]
     A --> B["User enters mandatory and optional project inputs"]
     B --> C["User may upload a 3D model"]
-    C --> D["Backend checks what is present, missing, or estimated"]
+    C --> D["✅ Backend checks what is present, missing, or estimated"]
     D --> E["Backend resolves location and fetches house data"]
     E --> F["Backend fetches location-based solar and weather inputs"]
     F --> G["Backend analyzes the roof"]
@@ -107,7 +107,7 @@ flowchart TD
    model_file=<optional .glb file>
    ```
 
-   V1 validates the submitted inputs and optional `.glb` file, then returns a validation summary. Roof lookup, sizing, BOM generation, and 3D placement are later steps behind the same route.
+   ✅ Implemented: V1 validates the submitted inputs and optional `.glb` file, then returns a validation summary. Roof lookup, sizing, BOM generation, and 3D placement are later steps behind the same route.
 
 3. **Upload optional 3D model**
    - The user may optionally upload a 3D model at the start.
