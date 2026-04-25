@@ -1,6 +1,8 @@
 from pathlib import Path
 
 import numpy as np
+import pytest
+from fastapi import HTTPException
 from PIL import Image
 
 from app.models.recommendation import (
@@ -10,6 +12,7 @@ from app.models.recommendation import (
     SolarBuildingData,
     SolarRoofSegment,
 )
+from app.models.roof import RoofSelectionRequest
 from app.services.roof.building_outline_service import (
     BuildingOutlineService,
     BuildingOutlineUnavailableError,
@@ -87,6 +90,13 @@ def test_building_outline_service_returns_all_yolo_masks(tmp_path: Path) -> None
 
     assert len(outlines) == 2
     assert outlines[0].model_id == "keremberke/yolov8m-building-segmentation"
+    assert outlines[0].id == "detected-roof-1"
+    assert outlines[0].bounding_box_pixels.model_dump() == {
+        "x_min": 0,
+        "y_min": 0,
+        "x_max": 40,
+        "y_max": 40,
+    }
     assert outlines[0].polygon_pixels == [[0, 0], [40, 0], [40, 40], [0, 40]]
     assert outlines[0].area_pixels == 1600
     assert outlines[0].confidence == 0.4
@@ -134,7 +144,10 @@ def test_roof_analysis_service_returns_roof_planes_and_outline(tmp_path: Path) -
     )
 
     assert analysis.status == "analyzed"
+    assert analysis.satellite_image_url == "/api/house-assets/test-asset/overhead.png"
     assert len(analysis.roof_outlines) == 2
+    assert analysis.roof_outlines[0].id == "roof-001"
+    assert analysis.roof_outlines[1].id == "roof-002"
     assert analysis.roof_planes[0]["pitch_degrees"] == 35
     assert analysis.roof_planes[0]["azimuth_degrees"] == 180
 
@@ -158,5 +171,47 @@ def test_roof_analysis_service_skips_when_outline_dependency_is_missing(tmp_path
     )
 
     assert analysis.status == "skipped"
+    assert analysis.satellite_image_url == "/api/house-assets/test-asset/overhead.png"
     assert analysis.roof_outlines == []
     assert analysis.warnings == ["vision dependency missing"]
+
+
+def test_roof_analysis_service_selects_single_roof_outline(tmp_path: Path) -> None:
+    image_path = tmp_path / "overhead.png"
+    Image.new("RGB", (100, 100), "white").save(image_path)
+
+    response = RoofAnalysisService(FakeBuildingOutlineService()).select_roof(
+        RoofSelectionRequest(
+            satellite_image_url="/api/house-assets/test-asset/overhead.png",
+            selected_roof_outline_ids=["roof-002"],
+        ),
+        FakeHouseDataService(image_path),
+    )
+
+    assert response.status == "selected"
+    assert response.selected_roof.selected_roof_outline_ids == ["roof-002"]
+    assert len(response.selected_roof.selected_roof_outlines) == 1
+    assert response.selected_roof.bounding_box_pixels.model_dump() == {
+        "x_min": 45,
+        "y_min": 45,
+        "x_max": 55,
+        "y_max": 55,
+    }
+    assert response.selected_roof.area_pixels == 100
+
+
+def test_roof_analysis_service_rejects_multiple_non_touching_roof_boxes(tmp_path: Path) -> None:
+    image_path = tmp_path / "overhead.png"
+    Image.new("RGB", (100, 100), "white").save(image_path)
+
+    with pytest.raises(HTTPException) as exc:
+        RoofAnalysisService(FakeBuildingOutlineService()).select_roof(
+            RoofSelectionRequest(
+                satellite_image_url="/api/house-assets/test-asset/overhead.png",
+                selected_roof_outline_ids=["roof-001", "roof-002"],
+            ),
+            FakeHouseDataService(image_path),
+        )
+
+    assert exc.value.status_code == 400
+    assert exc.value.detail == "Selected roof outline bounding boxes must touch or overlap."

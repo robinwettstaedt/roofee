@@ -114,6 +114,90 @@ flowchart TD
 
    The frontend must send `latitude` and `longitude` from Google Places with the selected address. For a standalone Google Photorealistic 3D Tiles GLB, call `POST /api/location/house-model` with the same coordinates or with an address.
 
+   Roof outline selection contract:
+
+   `POST /api/recommendations` returns the satellite image and every detected roof/building outline:
+
+   ```json
+   {
+     "house_data": {
+       "overhead_image_url": "/api/house-assets/{asset_id}/overhead.png"
+     },
+     "roof_analysis": {
+       "status": "analyzed",
+       "satellite_image_url": "/api/house-assets/{asset_id}/overhead.png",
+       "roof_outlines": [
+         {
+           "id": "roof-001",
+           "source": "huggingface_yolov8",
+           "model_id": "keremberke/yolov8m-building-segmentation",
+           "class_name": "Building",
+           "bounding_box_pixels": {
+             "x_min": 42,
+             "y_min": 61,
+             "x_max": 128,
+             "y_max": 155
+           },
+           "polygon_pixels": [[42, 61], [128, 64], [121, 155], [44, 148]],
+           "area_pixels": 2908.5,
+           "confidence": 0.634
+         }
+       ]
+     }
+   }
+   ```
+
+   The frontend should render `roof_analysis.satellite_image_url` and draw/select from `roof_outlines[*].bounding_box_pixels`. After the user selects the exact target roof, send only backend-provided IDs back:
+
+   ```http
+   POST /api/roof/selection
+   Content-Type: application/json
+   ```
+
+   ```json
+   {
+     "satellite_image_url": "/api/house-assets/{asset_id}/overhead.png",
+     "selected_roof_outline_ids": ["roof-003"]
+   }
+   ```
+
+   Multiple IDs are allowed only when their bounding boxes touch or overlap, so the selection still represents one connected roof. The backend validates the selection and returns the focused roof geometry:
+
+   ```json
+   {
+     "status": "selected",
+     "selected_roof": {
+       "satellite_image_url": "/api/house-assets/{asset_id}/overhead.png",
+       "selected_roof_outline_ids": ["roof-003"],
+       "selected_roof_outlines": [
+         {
+           "id": "roof-003",
+           "source": "huggingface_yolov8",
+           "model_id": "keremberke/yolov8m-building-segmentation",
+           "class_name": "Building",
+           "bounding_box_pixels": {
+             "x_min": 42,
+             "y_min": 61,
+             "x_max": 128,
+             "y_max": 155
+           },
+           "polygon_pixels": [[42, 61], [128, 64], [121, 155], [44, 148]],
+           "area_pixels": 2908.5,
+           "confidence": 0.634
+         }
+       ],
+       "bounding_box_pixels": {
+         "x_min": 42,
+         "y_min": 61,
+         "x_max": 128,
+         "y_max": 155
+       },
+       "area_pixels": 2908.5
+     },
+     "warnings": []
+   }
+   ```
+
 3. **Upload optional 3D model**
    - The user may optionally upload a 3D model at the start.
    - The model can improve or override address-derived roof geometry.

@@ -16,7 +16,7 @@ from app.models.recommendation import (
     SolarBuildingData,
     SolarWeatherMetadata,
 )
-from app.models.roof import RoofAnalysis, RoofAnalysisStatus, RoofOutline
+from app.models.roof import BoundingBoxPixels, RoofAnalysis, RoofAnalysisStatus, RoofOutline
 from app.services.house_data_service import get_house_data_service
 from app.services.pvgis_service import get_pvgis_service
 from app.services.roof.roof_analysis_service import get_roof_analysis_service
@@ -81,10 +81,13 @@ class FakeRoofAnalysisService:
     def analyze_house(self, house_data: HouseData, house_data_service: object) -> RoofAnalysis:
         return RoofAnalysis(
             status=RoofAnalysisStatus.ANALYZED,
+            satellite_image_url=house_data.overhead_image_url,
             roof_outlines=[
                 RoofOutline(
+                    id="roof-001",
                     source="test",
                     model_id="test-building-outline",
+                    bounding_box_pixels=BoundingBoxPixels(x_min=0, y_min=0, x_max=10, y_max=10),
                     polygon_pixels=[[0, 0], [10, 0], [10, 10], [0, 10]],
                     area_pixels=100,
                     confidence=0.9,
@@ -227,8 +230,16 @@ def test_recommendation_route_accepts_multipart_without_model_file(client: TestC
     assert payload["house_data"]["overhead_image_url"] == "/api/house-assets/test-asset/overhead.png"
     assert payload["house_data"]["tiles_3d"]["root_url"] == "/api/google-3d-tiles/root.json"
     assert payload["roof_analysis"]["status"] == "analyzed"
+    assert payload["roof_analysis"]["satellite_image_url"] == "/api/house-assets/test-asset/overhead.png"
     assert len(payload["roof_analysis"]["roof_outlines"]) == 1
+    assert payload["roof_analysis"]["roof_outlines"][0]["id"] == "roof-001"
     assert payload["roof_analysis"]["roof_outlines"][0]["model_id"] == "test-building-outline"
+    assert payload["roof_analysis"]["roof_outlines"][0]["bounding_box_pixels"] == {
+        "x_min": 0,
+        "y_min": 0,
+        "x_max": 10,
+        "y_max": 10,
+    }
     assert {"field": "load_profile", "value": "H0", "reason": "defaulted"} in payload["estimated_inputs"]
     assert {"field": "shading_level", "value": "unknown", "reason": "not_provided"} in payload["estimated_inputs"]
 
