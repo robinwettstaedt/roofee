@@ -97,6 +97,18 @@ flowchart TD
    | `roof_tilt` | number | Required only if roof lookup/model analysis cannot provide it. |
    | `roof_azimuth` | number | Required only if roof lookup/model analysis cannot provide it. |
 
+   Frontend submission route:
+
+   ```text
+   POST /api/recommendations
+   Content-Type: multipart/form-data
+
+   request=<JSON string containing the fields above>
+   model_file=<optional .glb file>
+   ```
+
+   V1 validates the submitted inputs and optional `.glb` file, then returns a validation summary. Roof lookup, sizing, BOM generation, and 3D placement are later steps behind the same route.
+
 3. **Upload optional 3D model**
    - The user may optionally upload a 3D model at the start.
    - The model can improve or override address-derived roof geometry.
