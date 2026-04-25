@@ -4,11 +4,12 @@ import type { Design, DesignResponse } from "@/types/api";
 import type { PanelDimensions } from "@/lib/catalog";
 import { buildVariants, variantFor, type VariantId } from "@/lib/variants";
 import { eur } from "@/lib/format";
+import { annualGenerationFromPvgis } from "@/lib/realGeneration";
+import type { RecommendationValidationResponse } from "@/types/recommendation";
 import { BomSidebar } from "./BomSidebar";
 import { CanvasOverlays, type Note } from "./CanvasOverlays";
 import { PlacementControls } from "./PlacementControls";
 import { PresentToggle } from "./PresentToggle";
-import { RefineChat } from "./RefineChat";
 import { Scene } from "./Scene";
 import { SessionBar } from "./SessionBar";
 import { SparkLine } from "./SparkLine";
@@ -24,8 +25,7 @@ export function Designer({
   placementOverride,
   onPlacementChange,
   onPlacementReset,
-  refineLoading,
-  onRefine,
+  recommendation,
   onBack,
 }: {
   response: DesignResponse;
@@ -35,14 +35,28 @@ export function Designer({
   placementOverride: PlacementOverride;
   onPlacementChange: (p: PlacementOverride) => void;
   onPlacementReset: () => void;
-  refineLoading: boolean;
-  onRefine: (intent: string) => void;
+  recommendation: RecommendationValidationResponse | null;
   onBack: () => void;
 }) {
   const variants = useMemo(() => buildVariants(baseDesign), [baseDesign]);
   const [variantId, setVariantId] = useState<VariantId>("standard");
   const variant = variantFor(variants, variantId);
   const design = variant.design;
+
+  // Real PVGIS-derived annual generation for the active variant; null until
+  // /api/recommendations completes, in which case we keep showing the mock.
+  const realAnnualGenerationKwh = annualGenerationFromPvgis(
+    design.pv.kwp,
+    recommendation?.solar_weather,
+  );
+
+  const realLatLng = recommendation?.house_data?.location ?? null;
+  const realAddress = recommendation?.input.address ?? null;
+  const realRoofAreaM2 =
+    recommendation?.house_data?.solar_building.roof_segments.reduce(
+      (sum, seg) => sum + (seg.area_meters2 ?? 0),
+      0,
+    ) ?? null;
 
   const [mode, setMode] = useState<"edit" | "present">("edit");
   const [hour, setHour] = useState(13);
@@ -52,7 +66,9 @@ export function Designer({
   const [notes, setNotes] = useState<Note[]>([]);
   const [tuning, setTuning] = useState(false);
 
-  const monthlySavings = (design.metrics.annualGenerationKwh * 0.32) / 12;
+  const annualKwhForUi =
+    realAnnualGenerationKwh ?? design.metrics.annualGenerationKwh;
+  const monthlySavings = (annualKwhForUi * 0.32) / 12;
   const presenting = mode === "present";
 
   return (
@@ -62,9 +78,11 @@ export function Designer({
         onBack={onBack}
         breadcrumb={
           <span className="font-mono num text-[12px]">
-            {response.location.latLng.lat.toFixed(4)}°,{" "}
-            {response.location.latLng.lng.toFixed(4)}° ·{" "}
-            <span className="text-ink-soft">Hauptstraße 1, 10827 Berlin</span>
+            {(realLatLng?.latitude ?? response.location.latLng.lat).toFixed(4)}°,{" "}
+            {(realLatLng?.longitude ?? response.location.latLng.lng).toFixed(4)}° ·{" "}
+            <span className="text-ink-soft">
+              {realAddress ?? "Hauptstraße 1, 10827 Berlin"}
+            </span>
           </span>
         }
         rightSlot={
@@ -123,9 +141,13 @@ export function Designer({
               onRemoveNote={(id) =>
                 setNotes((arr) => arr.filter((n) => n.id !== id))
               }
-              freeRoofM2={response.roof.segments[0]?.areaMeters2 ?? 56}
-              lat={response.location.latLng.lat}
-              lng={response.location.latLng.lng}
+              freeRoofM2={
+                (realRoofAreaM2 && realRoofAreaM2 > 0
+                  ? realRoofAreaM2
+                  : response.roof.segments[0]?.areaMeters2) ?? 56
+              }
+              lat={realLatLng?.latitude ?? response.location.latLng.lat}
+              lng={realLatLng?.longitude ?? response.location.latLng.lng}
             />
           )}
 
@@ -137,13 +159,9 @@ export function Designer({
             />
           )}
 
-          {!presenting && (
-            <RefineChat onRefine={onRefine} loading={refineLoading} />
-          )}
-
           {presenting && (
             <PresentingOverlay
-              annualKwh={design.metrics.annualGenerationKwh}
+              annualKwh={annualKwhForUi}
               monthlySavingsEur={monthlySavings}
               kwp={design.pv.kwp}
             />
@@ -157,6 +175,9 @@ export function Designer({
               design={design}
               variantLabel={variant.label}
               notesCount={notes.length}
+              realAnnualGenerationKwh={realAnnualGenerationKwh}
+              estimatedInputs={recommendation?.estimated_inputs ?? []}
+              warnings={recommendation?.warnings ?? []}
               onSendCustomer={() => alert("Sending offer to customer (stub)")}
               onAddToInstallQueue={() =>
                 alert(`Added to install queue with ${notes.length} notes`)

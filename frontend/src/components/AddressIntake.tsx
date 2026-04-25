@@ -1,7 +1,13 @@
 "use client";
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import type { Profile } from "@/types/api";
 import { SecondaryInputs } from "./SecondaryInputs";
+import {
+  loadGoogleMaps,
+  type AutocompleteSessionToken,
+  type AutocompleteSuggestion,
+  type GoogleMapsNamespace,
+} from "@/lib/google-maps";
 
 export function AddressIntake({
   initialAddress = "Hauptstraße 1, 10827 Berlin",
@@ -19,15 +25,143 @@ export function AddressIntake({
   const [heating, setHeating] = useState<Profile["heating"]>("gas");
   const [hasEv, setHasEv] = useState(false);
   const [evKmPerYear, setEvKmPerYear] = useState(12000);
+  const [houseSizeSqm, setHouseSizeSqm] = useState(110);
+  const [hasSolar, setHasSolar] = useState(false);
+  const [hasStorage, setHasStorage] = useState(false);
+  const [hasWallbox, setHasWallbox] = useState(false);
+  const [latitude, setLatitude] = useState<number | null>(null);
+  const [longitude, setLongitude] = useState<number | null>(null);
+  const [googlePlaceId, setGooglePlaceId] = useState<string | null>(null);
   const [fileName, setFileName] = useState<string | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
+  const wrapRef = useRef<HTMLDivElement>(null);
+  const googleRef = useRef<GoogleMapsNamespace | null>(null);
+  const sessionTokenRef = useRef<AutocompleteSessionToken | null>(null);
+  const debounceRef = useRef<number | null>(null);
+  const [suggestions, setSuggestions] = useState<AutocompleteSuggestion[]>([]);
+  const [showDropdown, setShowDropdown] = useState(false);
+  const [highlightedIndex, setHighlightedIndex] = useState(-1);
 
+  // load Google Maps once on mount of step 1
   useEffect(() => {
-    if (step === 1) {
-      inputRef.current?.focus();
-      inputRef.current?.select();
+    if (step !== 1) return;
+    inputRef.current?.focus();
+    inputRef.current?.select();
+
+    const apiKey = process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY;
+    if (!apiKey) {
+      console.warn(
+        "[AddressIntake] NEXT_PUBLIC_GOOGLE_MAPS_API_KEY not set — autocomplete disabled.",
+      );
+      return;
     }
+    let cancelled = false;
+    loadGoogleMaps(apiKey)
+      .then((g) => {
+        if (cancelled) return;
+        googleRef.current = g;
+        sessionTokenRef.current = new g.maps.places.AutocompleteSessionToken();
+      })
+      .catch((err) =>
+        console.error("[AddressIntake] Google Maps load failed:", err),
+      );
+    return () => {
+      cancelled = true;
+    };
   }, [step]);
+
+  // close dropdown on outside click
+  useEffect(() => {
+    if (!showDropdown) return;
+    const onDocClick = (e: MouseEvent) => {
+      if (!wrapRef.current?.contains(e.target as Node)) {
+        setShowDropdown(false);
+      }
+    };
+    document.addEventListener("mousedown", onDocClick);
+    return () => document.removeEventListener("mousedown", onDocClick);
+  }, [showDropdown]);
+
+  const fetchSuggestions = useCallback(async (input: string) => {
+    if (!googleRef.current || input.trim().length < 2) {
+      setSuggestions([]);
+      return;
+    }
+    try {
+      const { suggestions } =
+        await googleRef.current.maps.places.AutocompleteSuggestion.fetchAutocompleteSuggestions(
+          {
+            input,
+            sessionToken: sessionTokenRef.current ?? undefined,
+            includedRegionCodes: ["de"],
+            language: "de",
+            region: "DE",
+          },
+        );
+      setSuggestions(suggestions);
+      setShowDropdown(true);
+      setHighlightedIndex(-1);
+    } catch (err) {
+      console.error("[AddressIntake] suggestions fetch failed:", err);
+      setSuggestions([]);
+    }
+  }, []);
+
+  const onAddressInputChange = (next: string) => {
+    setAddress(next);
+    if (debounceRef.current) window.clearTimeout(debounceRef.current);
+    debounceRef.current = window.setTimeout(() => fetchSuggestions(next), 200);
+  };
+
+  const selectSuggestion = useCallback(
+    async (suggestion: AutocompleteSuggestion) => {
+      if (!suggestion.placePrediction) return;
+      try {
+        const place = suggestion.placePrediction.toPlace();
+        await place.fetchFields({
+          fields: ["formattedAddress", "location", "id"],
+        });
+        if (place.formattedAddress) setAddress(place.formattedAddress);
+        if (place.location) {
+          setLatitude(place.location.lat());
+          setLongitude(place.location.lng());
+        }
+        if (place.id) setGooglePlaceId(place.id);
+        // Per Google billing guidance: rotate session token after a place selection.
+        if (googleRef.current) {
+          sessionTokenRef.current =
+            new googleRef.current.maps.places.AutocompleteSessionToken();
+        }
+      } catch (err) {
+        console.error("[AddressIntake] place fetch failed:", err);
+      } finally {
+        setSuggestions([]);
+        setShowDropdown(false);
+        setHighlightedIndex(-1);
+      }
+    },
+    [],
+  );
+
+  const onKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (e.key === "ArrowDown" && suggestions.length) {
+      e.preventDefault();
+      setShowDropdown(true);
+      setHighlightedIndex((i) => (i + 1) % suggestions.length);
+    } else if (e.key === "ArrowUp" && suggestions.length) {
+      e.preventDefault();
+      setHighlightedIndex((i) => (i <= 0 ? suggestions.length - 1 : i - 1));
+    } else if (e.key === "Enter") {
+      if (showDropdown && highlightedIndex >= 0 && suggestions[highlightedIndex]) {
+        e.preventDefault();
+        void selectSuggestion(suggestions[highlightedIndex]);
+      } else {
+        continueToStep2();
+      }
+    } else if (e.key === "Escape") {
+      setShowDropdown(false);
+    }
+  };
 
   const ready = address.trim().length > 4;
 
@@ -45,6 +179,13 @@ export function AddressIntake({
       heating,
       hasEv,
       ...(hasEv ? { evKmPerYear } : {}),
+      houseSizeSqm,
+      hasSolar,
+      hasStorage,
+      hasWallbox,
+      latitude,
+      longitude,
+      googlePlaceId,
     });
   }
 
@@ -73,20 +214,59 @@ export function AddressIntake({
             </p>
 
             <div
-              className="rise mt-12"
+              className="rise mt-12 relative z-30"
               style={{ animationDelay: "180ms" }}
             >
-              <input
-                ref={inputRef}
-                className="input-hero text-[26px] md:text-[30px]"
-                value={address}
-                onChange={(e) => setAddress(e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key === "Enter") continueToStep2();
-                }}
-                placeholder="Street and city"
-                spellCheck={false}
-              />
+              <div ref={wrapRef} className="relative">
+                <input
+                  ref={inputRef}
+                  className="input-hero text-[26px] md:text-[30px]"
+                  value={address}
+                  onChange={(e) => onAddressInputChange(e.target.value)}
+                  onFocus={() => {
+                    if (suggestions.length) setShowDropdown(true);
+                  }}
+                  onKeyDown={onKeyDown}
+                  placeholder="Street and city"
+                  spellCheck={false}
+                  autoComplete="off"
+                />
+                {showDropdown && suggestions.length > 0 && (
+                  <ul
+                    role="listbox"
+                    className="absolute left-0 right-0 top-full z-30 mt-2 max-h-80 overflow-auto rounded-xl border border-ink/15 bg-paper shadow-lg"
+                  >
+                    {suggestions.map((s, i) => {
+                      const pred = s.placePrediction;
+                      if (!pred) return null;
+                      const main = pred.structuredFormat?.mainText.text ?? pred.text.text;
+                      const secondary = pred.structuredFormat?.secondaryText?.text ?? "";
+                      const active = i === highlightedIndex;
+                      return (
+                        <li
+                          key={pred.placeId}
+                          role="option"
+                          aria-selected={active}
+                          onMouseEnter={() => setHighlightedIndex(i)}
+                          onMouseDown={(e) => {
+                            // mousedown beats blur — keeps input focus
+                            e.preventDefault();
+                            void selectSuggestion(s);
+                          }}
+                          className={`flex cursor-pointer items-baseline gap-3 px-4 py-3 text-left transition ${
+                            active ? "bg-paper-deep" : "hover:bg-paper-deep/60"
+                          }`}
+                        >
+                          <span className="text-[15px] text-ink">{main}</span>
+                          {secondary && (
+                            <span className="text-[12px] text-dust">{secondary}</span>
+                          )}
+                        </li>
+                      );
+                    })}
+                  </ul>
+                )}
+              </div>
             </div>
 
             <div
@@ -162,6 +342,14 @@ export function AddressIntake({
                 onHasEv={setHasEv}
                 evKmPerYear={evKmPerYear}
                 onEvKmPerYear={setEvKmPerYear}
+                houseSizeSqm={houseSizeSqm}
+                onHouseSizeSqm={setHouseSizeSqm}
+                hasSolar={hasSolar}
+                onHasSolar={setHasSolar}
+                hasStorage={hasStorage}
+                onHasStorage={setHasStorage}
+                hasWallbox={hasWallbox}
+                onHasWallbox={setHasWallbox}
               />
             </div>
 

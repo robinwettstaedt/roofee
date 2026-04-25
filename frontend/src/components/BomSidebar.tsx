@@ -1,6 +1,7 @@
 "use client";
 import { useState } from "react";
 import type { BomLine, Design } from "@/types/api";
+import type { EstimatedInput } from "@/types/recommendation";
 import { eur, kwh, co2, num } from "@/lib/format";
 import { useCountUp } from "@/lib/useCountUp";
 import { Eyebrow } from "./primitives/Eyebrow";
@@ -31,6 +32,9 @@ export function BomSidebar({
   design,
   variantLabel,
   notesCount,
+  realAnnualGenerationKwh,
+  estimatedInputs = [],
+  warnings = [],
   onSendCustomer,
   onAddToInstallQueue,
   onSaveTemplate,
@@ -39,6 +43,9 @@ export function BomSidebar({
   design: Design;
   variantLabel: string;
   notesCount: number;
+  realAnnualGenerationKwh?: number | null;
+  estimatedInputs?: EstimatedInput[];
+  warnings?: string[];
   onSendCustomer?: () => void;
   onAddToInstallQueue?: () => void;
   onSaveTemplate?: () => void;
@@ -48,8 +55,15 @@ export function BomSidebar({
     <aside className="flex h-full w-full flex-col overflow-hidden border-l border-ink/15 bg-paper">
       <div className="flex-1 overflow-y-auto">
         <Header design={design} variantLabel={variantLabel} />
+        <BackendNotice
+          estimatedInputs={estimatedInputs}
+          warnings={warnings}
+        />
         <Rule soft />
-        <Metrics design={design} />
+        <Metrics
+          design={design}
+          realAnnualGenerationKwh={realAnnualGenerationKwh}
+        />
         <Rule soft />
         <SystemStrip design={design} />
         <Rule soft />
@@ -70,6 +84,63 @@ export function BomSidebar({
       />
     </aside>
   );
+}
+
+function MockedChip() {
+  return (
+    <span
+      className="ml-1.5 inline-flex items-center rounded-sm border border-ink/20 px-1 text-[9px] font-medium uppercase tracking-[0.18em] text-dust"
+      title="Synthesized client-side until the backend ships sizing/BOM."
+    >
+      Mock
+    </span>
+  );
+}
+
+function BackendNotice({
+  estimatedInputs,
+  warnings,
+}: {
+  estimatedInputs: EstimatedInput[];
+  warnings: string[];
+}) {
+  if (estimatedInputs.length === 0 && warnings.length === 0) return null;
+  return (
+    <div className="px-6 pb-5 pt-2 fade">
+      {estimatedInputs.length > 0 && (
+        <ul className="space-y-1 text-[11px] text-dust">
+          {estimatedInputs.map((e) => (
+            <li key={e.field}>
+              <span className="text-ink-soft">Estimated</span> {prettyField(e.field)} ={" "}
+              <span className="font-mono num text-ink">{String(e.value)}</span>
+            </li>
+          ))}
+        </ul>
+      )}
+      {warnings.length > 0 && (
+        <ul
+          className={`space-y-1 text-[11px] text-amber ${
+            estimatedInputs.length > 0 ? "mt-2" : ""
+          }`}
+        >
+          {warnings.map((w) => (
+            <li key={w}>! {prettyWarning(w)}</li>
+          ))}
+        </ul>
+      )}
+    </div>
+  );
+}
+
+function prettyField(field: string): string {
+  return field.replace(/_/g, " ");
+}
+
+function prettyWarning(code: string): string {
+  if (code === "heating_existing_type_unknown") {
+    return "Heating type unknown — heat-pump fit will fall back to estimates.";
+  }
+  return code.replace(/_/g, " ");
 }
 
 function Header({
@@ -97,24 +168,43 @@ function Header({
   );
 }
 
-function Metrics({ design }: { design: Design }) {
+function Metrics({
+  design,
+  realAnnualGenerationKwh,
+}: {
+  design: Design;
+  realAnnualGenerationKwh?: number | null;
+}) {
+  const generationTarget =
+    realAnnualGenerationKwh ?? design.metrics.annualGenerationKwh;
   const cost = useCountUp(design.metrics.systemCostEur);
-  const gen = useCountUp(design.metrics.annualGenerationKwh);
+  const gen = useCountUp(generationTarget);
   const payback = useCountUp(design.metrics.paybackYears);
   const co2yr = useCountUp(design.metrics.co2SavedKgPerYear);
+  const generationIsReal = realAnnualGenerationKwh != null;
 
   return (
     <div className="grid grid-cols-2 gap-px bg-ink/10">
       <Metric
-        eyebrow="Yearly generation"
+        eyebrow={
+          <>
+            Yearly generation
+            {!generationIsReal && <MockedChip />}
+          </>
+        }
         value={kwh(gen)}
         accent
         sub={
-          <SparkLine annualKwh={design.metrics.annualGenerationKwh} />
+          <SparkLine annualKwh={generationTarget} />
         }
       />
       <Metric
-        eyebrow="System cost"
+        eyebrow={
+          <>
+            System cost
+            <MockedChip />
+          </>
+        }
         value={eur(Math.round(cost))}
         sub={
           <span className="font-mono text-[10px] uppercase tracking-[0.2em] text-dust">
@@ -123,7 +213,12 @@ function Metrics({ design }: { design: Design }) {
         }
       />
       <Metric
-        eyebrow="Payback"
+        eyebrow={
+          <>
+            Payback
+            <MockedChip />
+          </>
+        }
         value={
           <>
             <span className="num">{payback.toFixed(1)}</span>{" "}
@@ -132,7 +227,12 @@ function Metrics({ design }: { design: Design }) {
         }
       />
       <Metric
-        eyebrow="CO₂ saved / yr"
+        eyebrow={
+          <>
+            CO₂ saved / yr
+            <MockedChip />
+          </>
+        }
         value={co2(co2yr)}
         sub={
           <span className="font-mono text-[10px] uppercase tracking-[0.2em] text-dust">
@@ -150,7 +250,7 @@ function Metric({
   sub,
   accent,
 }: {
-  eyebrow: string;
+  eyebrow: React.ReactNode;
   value: React.ReactNode;
   sub?: React.ReactNode;
   accent?: boolean;

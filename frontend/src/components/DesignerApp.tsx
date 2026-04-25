@@ -1,5 +1,5 @@
 "use client";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { AddressIntake } from "./AddressIntake";
 import { Designer } from "./Designer";
 import { ProcessingNarrative } from "./ProcessingNarrative";
@@ -11,11 +11,12 @@ import {
   type CatalogComponent,
   type PanelDimensions,
 } from "@/lib/catalog";
+import { buildRecommendationRequest } from "@/lib/recommendationProfile";
+import type { DesignResponse, Profile } from "@/types/api";
 import type {
-  DesignResponse,
-  Profile,
-  RefineResponse,
-} from "@/types/api";
+  HouseModelMetadata,
+  RecommendationValidationResponse,
+} from "@/types/recommendation";
 
 const HOUSE_GLB = "/house.glb";
 
@@ -54,15 +55,22 @@ function loadStoredPlacement(): PlacementOverride {
 
 type View = "intake" | "thinking" | "designer";
 
+type PendingPayload = {
+  design: DesignResponse;
+  recommendation: RecommendationValidationResponse | null;
+  houseGlbUrl: string | null;
+};
+
 export default function DesignerApp() {
   const [view, setView] = useState<View>("intake");
-  const [pendingResponse, setPendingResponse] = useState<DesignResponse | null>(
-    null,
-  );
+  const [pendingPayload, setPendingPayload] = useState<PendingPayload | null>(null);
   const [response, setResponse] = useState<DesignResponse | null>(null);
-  const [refineLoading, setRefineLoading] = useState(false);
+  const [recommendation, setRecommendation] =
+    useState<RecommendationValidationResponse | null>(null);
+  const [houseGlbUrl, setHouseGlbUrl] = useState<string | null>(null);
   const [catalogPanel, setCatalogPanel] = useState<CatalogComponent | null>(null);
   const [placement, setPlacement] = useState<PlacementOverride>(DEFAULT_PLACEMENT);
+  const previousGlbUrl = useRef<string | null>(null);
 
   useEffect(() => {
     setPlacement(loadStoredPlacement());
@@ -92,50 +100,101 @@ export default function DesignerApp() {
 
   const handleGenerate = useCallback(async (profile: Profile) => {
     setView("thinking");
-    setPendingResponse(null);
-    try {
-      const res = await fetch("/api/design", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify(profile),
+    setPendingPayload(null);
+
+    // Step 1 + Step 3 can race; Step 2 needs lat/lng.
+    // Step 1: fetch GLB (and lat/lng if not already from Places autocomplete).
+    const houseModelPromise = fetchHouseModel(profile);
+
+    // Step 3 (still mocked): /api/design for the synthesized BOM.
+    // TODO: when backend ships steps G–K, this entire call disappears and
+    // step 2's response carries the real Design.
+    const designPromise: Promise<DesignResponse | null> = fetch("/api/design", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(profile),
+    })
+      .then((res) => (res.ok ? (res.json() as Promise<DesignResponse>) : null))
+      .catch((err) => {
+        console.error("[DesignerApp] /api/design failed:", err);
+        return null;
       });
-      const data = (await res.json()) as DesignResponse;
-      setPendingResponse(data);
+
+    try {
+      const houseModel = await houseModelPromise;
+      const latLng =
+        profile.latitude != null && profile.longitude != null
+          ? { latitude: profile.latitude, longitude: profile.longitude }
+          : houseModel.latLng;
+
+      // Step 2: real /api/recommendations now that we have lat/lng.
+      let recommendationResponse: RecommendationValidationResponse | null = null;
+      if (latLng) {
+        try {
+          const recRequest = buildRecommendationRequest(
+            profile,
+            latLng,
+            profile.googlePlaceId,
+          );
+          const formData = new FormData();
+          formData.append("request", JSON.stringify(recRequest));
+          const recRes = await fetch("/api/recommendations", {
+            method: "POST",
+            body: formData,
+          });
+          if (recRes.ok) {
+            recommendationResponse =
+              (await recRes.json()) as RecommendationValidationResponse;
+          } else {
+            const detail = await recRes.text();
+            console.error(
+              "[DesignerApp] /api/recommendations failed",
+              recRes.status,
+              detail,
+            );
+          }
+        } catch (err) {
+          console.error("[DesignerApp] /api/recommendations threw:", err);
+        }
+      }
+
+      const designResponse = await designPromise;
+      if (!designResponse) {
+        setView("intake");
+        return;
+      }
+
+      setPendingPayload({
+        design: designResponse,
+        recommendation: recommendationResponse,
+        houseGlbUrl: houseModel.glbUrl,
+      });
     } catch (err) {
-      console.error(err);
+      console.error("[DesignerApp] handleGenerate failed:", err);
       setView("intake");
     }
   }, []);
 
   const handleNarrativeDone = useCallback(() => {
-    if (pendingResponse) {
-      setResponse(pendingResponse);
+    if (pendingPayload) {
+      setResponse(pendingPayload.design);
+      setRecommendation(pendingPayload.recommendation);
+      // Revoke the previous Blob URL when we replace it.
+      if (previousGlbUrl.current) URL.revokeObjectURL(previousGlbUrl.current);
+      previousGlbUrl.current = pendingPayload.houseGlbUrl;
+      setHouseGlbUrl(pendingPayload.houseGlbUrl);
       setView("designer");
     } else {
       setView("intake");
     }
-  }, [pendingResponse]);
+  }, [pendingPayload]);
 
-  const handleRefine = useCallback(
-    async (intent: string) => {
-      if (!response) return;
-      setRefineLoading(true);
-      try {
-        const res = await fetch("/api/refine", {
-          method: "POST",
-          headers: { "content-type": "application/json" },
-          body: JSON.stringify({ currentDesign: response.design, intent }),
-        });
-        const data = (await res.json()) as RefineResponse;
-        setResponse({ ...response, design: data.design });
-      } catch (err) {
-        console.error(err);
-      } finally {
-        setRefineLoading(false);
-      }
-    },
-    [response],
-  );
+  // Clean up the Blob URL on unmount so we don't leak memory.
+  useEffect(() => {
+    return () => {
+      if (previousGlbUrl.current) URL.revokeObjectURL(previousGlbUrl.current);
+    };
+  }, []);
 
   const handleBack = useCallback(() => {
     setView("intake");
@@ -150,12 +209,11 @@ export default function DesignerApp() {
           response={response}
           baseDesign={response.design}
           panelDims={panelDims}
-          modelUrl={HOUSE_GLB}
+          modelUrl={houseGlbUrl ?? HOUSE_GLB}
           placementOverride={placement}
           onPlacementChange={setPlacement}
           onPlacementReset={() => setPlacement(DEFAULT_PLACEMENT)}
-          refineLoading={refineLoading}
-          onRefine={handleRefine}
+          recommendation={recommendation}
           onBack={handleBack}
         />
       </>
@@ -173,4 +231,57 @@ export default function DesignerApp() {
       )}
     </>
   );
+}
+
+/**
+ * Fetch the Photorealistic 3D Tiles GLB for the home from the backend (via
+ * the Next proxy). Returns a Blob URL plus the geocoded lat/lng so the caller
+ * can fall back to backend-side geocoding when the user typed an address by
+ * hand instead of selecting a Google Places result.
+ */
+async function fetchHouseModel(profile: Profile): Promise<{
+  glbUrl: string | null;
+  latLng: { latitude: number; longitude: number } | null;
+}> {
+  const body: Record<string, unknown> = { address: profile.address };
+  if (profile.latitude != null && profile.longitude != null) {
+    body.latitude = profile.latitude;
+    body.longitude = profile.longitude;
+  }
+  try {
+    const res = await fetch("/api/location/house-model", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    if (!res.ok) {
+      const detail = await res.text();
+      console.warn(
+        "[DesignerApp] /api/location/house-model failed",
+        res.status,
+        detail,
+      );
+      return { glbUrl: null, latLng: null };
+    }
+    const meta = parseRoofeeMetadata(res.headers.get("Roofee-Metadata"));
+    const blob = await res.blob();
+    const url = URL.createObjectURL(blob);
+    const latLng =
+      meta != null
+        ? { latitude: meta.anchor_latitude, longitude: meta.anchor_longitude }
+        : null;
+    return { glbUrl: url, latLng };
+  } catch (err) {
+    console.warn("[DesignerApp] /api/location/house-model threw:", err);
+    return { glbUrl: null, latLng: null };
+  }
+}
+
+function parseRoofeeMetadata(raw: string | null): HouseModelMetadata | null {
+  if (!raw) return null;
+  try {
+    return JSON.parse(raw) as HouseModelMetadata;
+  } catch {
+    return null;
+  }
 }

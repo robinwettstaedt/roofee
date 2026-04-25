@@ -59,13 +59,33 @@ export type Design = {
   reasoning: { pv: string; battery: string; heatpump?: string };
 };
 
+export type HeatingType =
+  | "gas"
+  | "oil"
+  | "district"
+  | "electric"
+  | "heatpump"
+  | "none"
+  | "unknown";
+
 export type Profile = {
   address: string;
   monthlyBillEur: number;
   inhabitants: number;
-  heating: "gas" | "oil" | "district" | "electric" | "heatpump" | "none";
+  heating: HeatingType;
   hasEv: boolean;
   evKmPerYear?: number;
+  // V2 fields backing the real /api/recommendations contract.
+  // Optional only at the type level — the form always sets them.
+  houseSizeSqm?: number;
+  hasSolar?: boolean;
+  hasStorage?: boolean;
+  hasWallbox?: boolean;
+  // Geocoded metadata when the user picked a Google Places result. If null,
+  // DesignerApp falls back to /api/location/house-model server-side geocoding.
+  latitude?: number | null;
+  longitude?: number | null;
+  googlePlaceId?: string | null;
 };
 
 export type DesignResponse = {
