@@ -1,26 +1,183 @@
 @import "tailwindcss";
 
-:root {
-  --background: #ffffff;
-  --foreground: #171717;
-}
-
 @theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
+  --font-sans: var(--font-sans);
+  --font-mono: var(--font-mono);
+
+  --color-paper: #f7f5f0;
+  --color-paper-deep: #ece8de;
+  --color-ink: #181715;
+  --color-ink-soft: #2c2a26;
+  --color-dust: #807b72;
+  --color-dust-soft: #b9b3a4;
+  --color-signal: #e85a2c;
+  --color-signal-soft: #f08866;
+  --color-amber: #f0a93b;
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
+html,
+body {
+  font-family: var(--font-sans), system-ui, sans-serif;
+  font-feature-settings: "ss01", "cv11";
 }
 
 body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  background-color: var(--color-paper);
+  color: var(--color-ink);
+}
+
+/* Hairline rule utility — Swiss editorial, not a card border */
+.rule {
+  background-color: var(--color-ink);
+  height: 1px;
+  width: 100%;
+  opacity: 0.55;
+}
+
+.rule-soft {
+  background-color: var(--color-ink);
+  height: 1px;
+  width: 100%;
+  opacity: 0.18;
+}
+
+.rule-vert {
+  background-color: var(--color-ink);
+  width: 1px;
+  opacity: 0.18;
+}
+
+/* Reveal animations — used on intake cascade + screen transitions */
+@keyframes rise-in {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes draw-underline {
+  from {
+    transform: scaleX(0);
+  }
+  to {
+    transform: scaleX(1);
+  }
+}
+
+@keyframes fade-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+.rise {
+  animation: rise-in 480ms cubic-bezier(0.2, 0.7, 0.2, 1) both;
+}
+
+.fade {
+  animation: fade-in 320ms ease-out both;
+}
+
+.draw-underline {
+  transform-origin: left center;
+  animation: draw-underline 420ms cubic-bezier(0.2, 0.7, 0.2, 1) both;
+}
+
+/* Number tabular by default for any .num utility */
+.num {
+  font-variant-numeric: tabular-nums;
+  font-feature-settings: "tnum", "ss01";
+}
+
+/* Address input — hero, no box, just a bottom rule */
+.input-hero {
+  background: var(--color-paper);
+  border: 1px solid color-mix(in oklch, var(--color-ink) 18%, transparent);
+  border-radius: 12px;
+  padding: 1.1rem 1.4rem;
+  font-family: var(--font-sans), system-ui, sans-serif;
+  font-weight: 400;
+  letter-spacing: -0.01em;
+  outline: none;
+  transition: border-color 180ms ease, box-shadow 180ms ease;
+  width: 100%;
+  text-align: center;
+  box-shadow: 0 1px 0 color-mix(in oklch, var(--color-ink) 4%, transparent);
+}
+
+.input-hero::placeholder {
+  color: color-mix(in oklch, var(--color-ink) 22%, transparent);
+}
+
+.input-hero:focus {
+  border-color: var(--color-signal);
+  box-shadow: 0 0 0 3px color-mix(in oklch, var(--color-signal) 18%, transparent);
+}
+
+/* Grain effect — kept as a no-op shell for legacy usage; intentionally blank now */
+.grain::after { content: none; }
+
+/* Segmented control */
+.seg {
+  display: inline-flex;
+  border: 1px solid color-mix(in oklch, var(--color-ink) 22%, transparent);
+  border-radius: 0;
+}
+.seg button {
+  padding: 0.45rem 0.7rem;
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--color-dust);
+  border-right: 1px solid color-mix(in oklch, var(--color-ink) 12%, transparent);
+  background: transparent;
+  cursor: pointer;
+  transition: color 160ms ease, background 160ms ease;
+}
+.seg button:last-child { border-right: 0; }
+.seg button:hover { color: var(--color-ink); }
+.seg button[aria-pressed="true"] {
+  color: var(--color-paper);
+  background: var(--color-ink);
+}
+
+/* Range slider — minimal */
+input[type="range"] {
+  appearance: none;
+  width: 100%;
+  height: 2px;
+  background: color-mix(in oklch, var(--color-ink) 18%, transparent);
+  cursor: pointer;
+}
+input[type="range"]::-webkit-slider-thumb {
+  appearance: none;
+  width: 14px;
+  height: 14px;
+  border-radius: 9999px;
+  background: var(--color-signal);
+  border: 2px solid var(--color-paper);
+  box-shadow: 0 0 0 1px var(--color-ink);
+}
+input[type="range"]::-moz-range-thumb {
+  width: 14px;
+  height: 14px;
+  border-radius: 9999px;
+  background: var(--color-signal);
+  border: 2px solid var(--color-paper);
+  box-shadow: 0 0 0 1px var(--color-ink);
+}
+
+/* Floating overlay surface — used on canvas */
+.overlay-surface {
+  background: color-mix(in oklch, var(--color-paper) 86%, transparent);
+  backdrop-filter: blur(8px) saturate(1.05);
+  -webkit-backdrop-filter: blur(8px) saturate(1.05);
+  border: 1px solid color-mix(in oklch, var(--color-ink) 12%, transparent);
 }
