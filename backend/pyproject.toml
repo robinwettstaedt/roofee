@@ -9,8 +9,12 @@ description = "FastAPI backend for Roofee."
 requires-python = ">=3.11"
 dependencies = [
   "fastapi>=0.115.0",
+  "imagecodecs>=2024.9.22",
   "httpx>=0.27.0",
+  "numpy>=1.26.0",
+  "pillow>=10.4.0",
   "python-multipart>=0.0.9",
+  "tifffile>=2024.8.30",
   "uvicorn[standard]>=0.30.0",
   "pydantic-settings>=2.4.0"
 ]

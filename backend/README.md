@@ -12,7 +12,7 @@ flowchart TD
     A --> B["User enters mandatory and optional project inputs"]
     B --> C["User may upload a 3D model"]
     C --> D["✅ Backend checks what is present, missing, or estimated"]
-    D --> E["Backend resolves location and fetches house data"]
+    D --> E["✅ Backend resolves location and fetches house data"]
     E --> F["✅ Backend fetches location-based solar and weather inputs"]
     F --> G["Backend analyzes the roof"]
     G --> H["Backend checks where panels can fit"]
@@ -110,9 +110,9 @@ flowchart TD
    model_file=<optional .glb file>
    ```
 
-   ✅ Implemented: V1 validates the submitted inputs and optional `.glb` file, fetches baseline monthly solar/weather inputs from PVGIS using the submitted coordinates, then returns a validation summary. Roof lookup, sizing, BOM generation, and 3D placement are later steps behind the same route.
+   ✅ Implemented: V1 validates the submitted inputs and optional `.glb` file, fetches baseline monthly solar/weather inputs from PVGIS using the submitted coordinates, fetches Google Solar overhead imagery, and returns a validation summary. Roof analysis, sizing, BOM generation, and 3D panel placement are later steps behind the same route.
 
-   The frontend must send `latitude` and `longitude` from Google Places with the selected address. Backend Google Maps/Tiles house lookup is a separate later step and is not called during request validation.
+   The frontend must send `latitude` and `longitude` from Google Places with the selected address. For a standalone Google Photorealistic 3D Tiles GLB, call `POST /api/location/house-model` with the same coordinates or with an address.
 
 3. **Upload optional 3D model**
    - The user may optionally upload a 3D model at the start.
@@ -123,6 +123,8 @@ flowchart TD
    - The backend resolves the address into an exact location and fetches available house/building data from external map providers.
    - The address is also used for location-based inputs such as solar irradiation, expected sun hours, climate assumptions, and regional defaults.
    - V1 already uses frontend-provided coordinates to fetch PVGIS monthly horizontal irradiation, optimal-plane irradiation, and average temperature. If PVGIS fails, the recommendation route returns `502` instead of fake fallback data.
+   - `POST /api/location/house-model` resolves an address or accepts latitude/longitude, walks Google Photorealistic 3D Tiles around that anchor, selects the best intersecting leaf GLB, and returns `model/gltf-binary`. Structured tile metadata is JSON-encoded in the `Roofee-Metadata` response header.
+   - The route requires `ROOFEE_GOOGLE_API_KEY` or `ROOFEE_GOOGLE_MAPS_API_KEY` enabled for Geocoding API and Map Tiles API.
 
 5. **Understand the roof**
    - The backend identifies usable roof surfaces.
