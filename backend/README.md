@@ -13,7 +13,7 @@ flowchart TD
     B --> C["User may upload a 3D model"]
     C --> D["✅ Backend checks what is present, missing, or estimated"]
     D --> E["Backend resolves location and fetches house data"]
-    E --> F["Backend fetches location-based solar and weather inputs"]
+    E --> F["✅ Backend fetches location-based solar and weather inputs"]
     F --> G["Backend analyzes the roof"]
     G --> H["Backend checks where panels can fit"]
     H --> I["Backend creates good, better, and best options"]
@@ -46,7 +46,9 @@ flowchart TD
 
    | Field | Type | Notes |
    | --- | --- | --- |
-   | `address` | string | Required first step. Used for location, roof lookup, solar yield, climate, and regional defaults. |
+   | `address` | string | Required first step. The backend validates this only as a non-empty string in V1. |
+   | `latitude` | number | Required coordinate from frontend Google Places selection. Must be between -90 and 90. |
+   | `longitude` | number | Required coordinate from frontend Google Places selection. Must be between -180 and 180. |
    | `annual_electricity_demand_kwh` | number | User-facing version of dataset field `energy_demand_wh`. |
    | `electricity_price_per_kwh` | number | User-facing version of dataset field `energy_price_per_wh`. |
    | `load_profile` | string | Default to `H0` for household customers if the user does not choose another profile. |
@@ -96,6 +98,7 @@ flowchart TD
    | `usable_roof_area_sqm` | number | Required only if roof lookup/model analysis cannot provide it. |
    | `roof_tilt` | number | Required only if roof lookup/model analysis cannot provide it. |
    | `roof_azimuth` | number | Required only if roof lookup/model analysis cannot provide it. |
+   | `google_place_id` | string | Optional Google Places identifier captured by the frontend. |
 
    Frontend submission route:
 
@@ -107,7 +110,9 @@ flowchart TD
    model_file=<optional .glb file>
    ```
 
-   ✅ Implemented: V1 validates the submitted inputs and optional `.glb` file, then returns a validation summary. Roof lookup, sizing, BOM generation, and 3D placement are later steps behind the same route.
+   ✅ Implemented: V1 validates the submitted inputs and optional `.glb` file, fetches baseline monthly solar/weather inputs from PVGIS using the submitted coordinates, then returns a validation summary. Roof lookup, sizing, BOM generation, and 3D placement are later steps behind the same route.
+
+   The frontend must send `latitude` and `longitude` from Google Places with the selected address. Backend Google Maps/Tiles house lookup is a separate later step and is not called during request validation.
 
 3. **Upload optional 3D model**
    - The user may optionally upload a 3D model at the start.
@@ -117,6 +122,7 @@ flowchart TD
 4. **Fetch location data**
    - The backend resolves the address into an exact location and fetches available house/building data from external map providers.
    - The address is also used for location-based inputs such as solar irradiation, expected sun hours, climate assumptions, and regional defaults.
+   - V1 already uses frontend-provided coordinates to fetch PVGIS monthly horizontal irradiation, optimal-plane irradiation, and average temperature. If PVGIS fails, the recommendation route returns `502` instead of fake fallback data.
 
 5. **Understand the roof**
    - The backend identifies usable roof surfaces.

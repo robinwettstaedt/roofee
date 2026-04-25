@@ -29,6 +29,9 @@ class RecommendationRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     address: str = Field(min_length=1)
+    latitude: float = Field(ge=-90, le=90)
+    longitude: float = Field(ge=-180, le=180)
+    google_place_id: str | None = None
     annual_electricity_demand_kwh: float = Field(gt=0)
     electricity_price_per_kwh: float = Field(ge=0)
     load_profile: str = Field(default="H0", min_length=1)
@@ -90,6 +93,26 @@ class ModelFileValidation(BaseModel):
     version: int | None = None
 
 
+class MonthlySolarWeather(BaseModel):
+    month: int = Field(ge=1, le=12)
+    horizontal_irradiation_kwh_per_m2: float
+    optimal_irradiation_kwh_per_m2: float
+    average_temperature_c: float
+
+
+class SolarWeatherMetadata(BaseModel):
+    provider: str
+    api_version: str
+    latitude: float
+    longitude: float
+    source_url: str
+    request_params: dict[str, str | float | int]
+    annual_horizontal_irradiation_kwh_per_m2: float
+    annual_optimal_irradiation_kwh_per_m2: float
+    average_temperature_c: float
+    monthly: list[MonthlySolarWeather]
+
+
 class RecommendationValidationResponse(BaseModel):
     status: str
     input: RecommendationRequest
@@ -98,3 +121,4 @@ class RecommendationValidationResponse(BaseModel):
     estimated_inputs: list[EstimatedInput]
     warnings: list[str]
     model_file: ModelFileValidation
+    solar_weather: SolarWeatherMetadata | None = None
