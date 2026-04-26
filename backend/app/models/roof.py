@@ -104,6 +104,13 @@ class SimilarityTransform(BaseModel):
     algorithm: str
 
 
+class MappedRoofOutline(BaseModel):
+    id: str
+    source_polygon_pixels: list[list[int]]
+    render_polygon_pixels: list[list[int]]
+    model_polygon: list[list[float]] = Field(default_factory=list)
+
+
 class RegistrationQualityMetrics(BaseModel):
     algorithm: str | None = None
     confidence: float = Field(default=0, ge=0, le=1)
@@ -121,7 +128,67 @@ class RoofRegistrationResponse(BaseModel):
     status: str
     selected_roof: SelectedRoof
     transform: SimilarityTransform | None = None
+    mapped_roof_outlines: list[MappedRoofOutline] = Field(default_factory=list)
     mapped_roof_polygon_pixels: list[list[int]] = Field(default_factory=list)
     render_metadata: TopDownRenderMetadata
     quality: RegistrationQualityMetrics
+    warnings: list[str] = Field(default_factory=list)
+
+
+class RoofGeometryAnalysisRequest(RoofSelectionRequest):
+    model_radius_m: float = Field(default=50.0, gt=0, le=200)
+    roof_edge_setback_m: float = Field(default=0.35, ge=0)
+    obstruction_buffer_m: float = Field(default=0.25, ge=0)
+
+
+class MappedRoofObstruction(BaseModel):
+    id: str
+    class_name: str
+    source_polygon_pixels: list[list[int]]
+    render_polygon_pixels: list[list[int]]
+    model_polygon: list[list[float]]
+    area_m2: float = Field(ge=0)
+
+
+class RoofPlaneGeometry(BaseModel):
+    id: str
+    normal: list[float]
+    tilt_degrees: float = Field(ge=0, le=90)
+    azimuth_degrees: float = Field(ge=0, lt=360)
+    surface_area_m2: float = Field(ge=0)
+    footprint_area_m2: float = Field(ge=0)
+    footprint_polygon: list[list[float]]
+    render_polygon_pixels: list[list[int]]
+    source_face_count: int = Field(ge=0)
+    suitability_score: float = Field(ge=0, le=1)
+
+
+class UsableRoofRegion(BaseModel):
+    id: str
+    roof_plane_id: str
+    polygon: list[list[float]]
+    render_polygon_pixels: list[list[int]]
+    area_m2: float = Field(ge=0)
+
+
+class RemovedRoofArea(BaseModel):
+    id: str
+    roof_plane_id: str
+    source_type: str
+    source_id: str
+    class_name: str | None = None
+    polygon: list[list[float]]
+    area_m2: float = Field(ge=0)
+
+
+class RoofGeometryAnalysisResponse(BaseModel):
+    status: str
+    selected_roof: SelectedRoof
+    registration: RoofRegistrationResponse
+    mapped_roof_outlines: list[MappedRoofOutline] = Field(default_factory=list)
+    mapped_obstructions: list[MappedRoofObstruction] = Field(default_factory=list)
+    roof_planes: list[RoofPlaneGeometry] = Field(default_factory=list)
+    usable_regions: list[UsableRoofRegion] = Field(default_factory=list)
+    removed_areas: list[RemovedRoofArea] = Field(default_factory=list)
+    render_metadata: TopDownRenderMetadata
     warnings: list[str] = Field(default_factory=list)

@@ -10,6 +10,7 @@ import numpy as np
 from fastapi import HTTPException
 
 from app.models.roof import (
+    MappedRoofOutline,
     RegistrationQualityMetrics,
     RoofRegistrationRequest,
     RoofRegistrationResponse,
@@ -67,10 +68,16 @@ class RoofRegistrationService:
         if best_attempt.accepted and best_attempt.transform is not None:
             polygon = self._selected_polygon(selection.selected_roof)
             mapped_polygon = self._map_polygon(polygon, best_attempt.transform.matrix)
+            mapped_outlines = self._map_selected_roof_outlines(
+                selection.selected_roof,
+                best_attempt.transform.matrix,
+                request,
+            )
             return RoofRegistrationResponse(
                 status="registered",
                 selected_roof=selection.selected_roof,
                 transform=best_attempt.transform,
+                mapped_roof_outlines=mapped_outlines,
                 mapped_roof_polygon_pixels=mapped_polygon,
                 render_metadata=request.top_down_render_metadata,
                 quality=quality,
@@ -86,6 +93,7 @@ class RoofRegistrationService:
             status="failed",
             selected_roof=selection.selected_roof,
             transform=None,
+            mapped_roof_outlines=[],
             mapped_roof_polygon_pixels=[],
             render_metadata=request.top_down_render_metadata,
             quality=quality,
@@ -308,6 +316,52 @@ class RoofRegistrationService:
         points = np.asarray(polygon, dtype=np.float32).reshape(-1, 1, 2)
         mapped = cv2.transform(points, matrix_np).reshape(-1, 2)
         return [[int(round(float(x))), int(round(float(y)))] for x, y in mapped]
+
+    def _map_selected_roof_outlines(
+        self,
+        selected_roof: SelectedRoof,
+        matrix: list[list[float]],
+        request: RoofRegistrationRequest,
+    ) -> list[MappedRoofOutline]:
+        mapped_outlines: list[MappedRoofOutline] = []
+        for outline in selected_roof.selected_roof_outlines:
+            render_polygon = self._map_polygon(outline.polygon_pixels, matrix)
+            mapped_outlines.append(
+                MappedRoofOutline(
+                    id=outline.id,
+                    source_polygon_pixels=outline.polygon_pixels,
+                    render_polygon_pixels=render_polygon,
+                    model_polygon=[
+                        self.render_pixel_to_model_point(point, request.top_down_render_metadata)
+                        for point in render_polygon
+                    ],
+                )
+            )
+        return mapped_outlines
+
+    def render_pixel_to_model_point(
+        self,
+        point: list[int] | tuple[int, int],
+        metadata: Any,
+    ) -> list[float]:
+        bounds = metadata.orthographic_world_bounds
+        x_pixel = float(point[0])
+        y_pixel = float(point[1])
+        x = bounds.x_min + (x_pixel / metadata.render_width) * (bounds.x_max - bounds.x_min)
+        z = bounds.z_max - (y_pixel / metadata.render_height) * (bounds.z_max - bounds.z_min)
+        return [round(float(x), 4), round(float(z), 4)]
+
+    def model_point_to_render_pixel(
+        self,
+        point: list[float] | tuple[float, float],
+        metadata: Any,
+    ) -> list[int]:
+        bounds = metadata.orthographic_world_bounds
+        x = float(point[0])
+        z = float(point[1])
+        x_pixel = (x - bounds.x_min) / (bounds.x_max - bounds.x_min) * metadata.render_width
+        y_pixel = (bounds.z_max - z) / (bounds.z_max - bounds.z_min) * metadata.render_height
+        return [int(round(x_pixel)), int(round(y_pixel))]
 
     def _load_color_image(self, image_path: Path) -> np.ndarray:
         image = cv2.imread(str(image_path), cv2.IMREAD_COLOR)

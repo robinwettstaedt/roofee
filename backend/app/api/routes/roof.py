@@ -4,6 +4,8 @@ from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
 from pydantic import ValidationError
 
 from app.models.roof import (
+    RoofGeometryAnalysisRequest,
+    RoofGeometryAnalysisResponse,
     RoofObstructionAnalysis,
     RoofObstructionRequest,
     RoofRegistrationRequest,
@@ -12,6 +14,11 @@ from app.models.roof import (
     RoofSelectionResponse,
 )
 from app.services.house_data_service import HouseDataService, get_house_data_service
+from app.services.location.google_3d_tiles_service import Google3DTilesService, get_google_3d_tiles_service
+from app.services.roof.geometry_pipeline_service import (
+    RoofGeometryPipelineService,
+    get_roof_geometry_pipeline_service,
+)
 from app.services.roof.obstruction_service import (
     RoofObstructionService,
     get_roof_obstruction_service,
@@ -41,6 +48,20 @@ def analyze_roof_obstructions(
     obstruction_service: RoofObstructionService = Depends(get_roof_obstruction_service),
 ) -> RoofObstructionAnalysis:
     return obstruction_service.analyze_obstructions(request, house_data_service)
+
+
+@router.post("/roof/geometry", response_model=RoofGeometryAnalysisResponse)
+def analyze_roof_geometry(
+    request: RoofGeometryAnalysisRequest,
+    house_data_service: HouseDataService = Depends(get_house_data_service),
+    tiles_service: Google3DTilesService = Depends(get_google_3d_tiles_service),
+    pipeline_service: RoofGeometryPipelineService = Depends(get_roof_geometry_pipeline_service),
+) -> RoofGeometryAnalysisResponse:
+    return pipeline_service.analyze_geometry(
+        request,
+        house_data_service=house_data_service,
+        tiles_service=tiles_service,
+    )
 
 
 @router.post("/roof/registration", response_model=RoofRegistrationResponse)

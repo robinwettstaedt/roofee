@@ -1,3 +1,4 @@
+import json
 from io import BytesIO
 
 import httpx
@@ -113,6 +114,9 @@ def test_fetch_house_data_calls_google_solar_and_converts_rgb_geotiff(
     assert result.overhead_image_url.startswith("/api/house-assets/")
     assert result.tiles_3d.root_url == "/api/google-3d-tiles/root.json"
     assert (tmp_path / result.overhead_image_url.split("/")[3] / "overhead.png").is_file()
+    metadata_path = tmp_path / result.overhead_image_url.split("/")[3] / "metadata.json"
+    metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
+    assert metadata["building_center"] == {"latitude": 52.521, "longitude": 13.406}
     assert captured[0][1]["location.latitude"] == 52.52
     assert captured[1][1]["location.latitude"] == 52.521
     assert captured[1][1]["view"] == "IMAGERY_LAYERS"

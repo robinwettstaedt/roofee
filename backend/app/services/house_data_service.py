@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from hashlib import sha256
 from io import BytesIO
 from pathlib import Path, PurePosixPath
@@ -75,6 +76,17 @@ class HouseDataService:
         asset_id = self._asset_id(solar_building, data_layers_payload)
         overhead_image_url = f"/api/house-assets/{asset_id}/overhead.png"
         self._ensure_overhead_image(asset_id, data_layers_payload)
+        self._write_asset_metadata(
+            asset_id,
+            {
+                "provider": "google",
+                "requested_location": {"latitude": latitude, "longitude": longitude},
+                "building_center": solar_building.center.model_dump(mode="json"),
+                "solar_radius_meters": self.solar_radius_meters,
+                "solar_pixel_size_meters": self.solar_pixel_size_meters,
+                "solar_building": solar_building.model_dump(mode="json"),
+            },
+        )
 
         return HouseData(
             status="fetched",
@@ -102,6 +114,24 @@ class HouseDataService:
         if not path.is_file():
             raise HTTPException(status_code=404, detail="House asset not found.")
         return path
+
+    def house_asset_metadata(self, asset_id: str) -> dict[str, Any]:
+        path = self._safe_asset_path(asset_id, "metadata.json")
+        if not path.is_file():
+            raise HTTPException(status_code=404, detail="House asset metadata not found.")
+        try:
+            payload = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, ValueError) as exc:
+            raise HTTPException(status_code=422, detail="House asset metadata could not be loaded.") from exc
+        if not isinstance(payload, dict):
+            raise HTTPException(status_code=422, detail="House asset metadata is malformed.")
+        return payload
+
+    def house_model_cache_path(self, asset_id: str) -> Path:
+        return self._safe_asset_path(asset_id, "house.glb")
+
+    def house_model_metadata_cache_path(self, asset_id: str) -> Path:
+        return self._safe_asset_path(asset_id, "house_model_metadata.json")
 
     def fetch_3d_tile(
         self,
@@ -315,6 +345,32 @@ class HouseDataService:
 
     def _resolved_cache_dir(self) -> Path:
         return self.cache_dir.expanduser().resolve()
+
+    def _write_asset_metadata(self, asset_id: str, payload: dict[str, Any]) -> None:
+        path = self._safe_asset_path(asset_id, "metadata.json", require_exists=False)
+        try:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(json.dumps(payload, ensure_ascii=True, indent=2), encoding="utf-8")
+        except OSError as exc:
+            raise HTTPException(status_code=502, detail="House asset metadata could not be cached.") from exc
+
+    def _safe_asset_path(
+        self,
+        asset_id: str,
+        filename: str,
+        *,
+        require_exists: bool = False,
+    ) -> Path:
+        if not asset_id or "/" in asset_id or "\\" in asset_id or ".." in asset_id:
+            raise HTTPException(status_code=404, detail="House asset not found.")
+        path = (self._resolved_cache_dir() / asset_id / filename).resolve()
+        try:
+            path.relative_to(self._resolved_cache_dir())
+        except ValueError as exc:
+            raise HTTPException(status_code=404, detail="House asset not found.") from exc
+        if require_exists and not path.is_file():
+            raise HTTPException(status_code=404, detail="House asset not found.")
+        return path
 
     def _validate_tile_path(self, tile_path: str) -> str:
         parsed = urlparse(tile_path)
