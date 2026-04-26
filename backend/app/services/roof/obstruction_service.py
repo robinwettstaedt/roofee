@@ -1,9 +1,7 @@
 from __future__ import annotations
 
-import json
-import subprocess
 from pathlib import Path
-from typing import Any, Protocol
+from typing import Any
 
 from fastapi import HTTPException
 from PIL import Image
@@ -18,88 +16,30 @@ from app.models.roof import (
     SelectedRoof,
 )
 from app.services.house_data_service import HouseDataService
+from app.services.roof.rid_detector import (
+    RID_OBSTRUCTION_CLASSES,
+    RID_OBSTRUCTION_MODEL_ID,
+    RID_OBSTRUCTION_SOURCE,
+    RawObstructionDetection,
+    RidInProcessDetector,
+    RoofObstructionDetector,
+    RoofObstructionRuntimeError,
+)
 from app.services.roof.roof_analysis_service import RoofAnalysisService, get_roof_analysis_service
-
-
-RID_OBSTRUCTION_CLASSES = {"pvmodule", "dormer", "window", "ladder", "chimney"}
-RID_OBSTRUCTION_MODEL_ID = "rid_unet_resnet34_best"
-RID_OBSTRUCTION_SOURCE = "rid_unet"
-
-
-class RoofObstructionRuntimeError(RuntimeError):
-    pass
-
-
-class ObstructionRuntime(Protocol):
-    def detect_obstructions(self, image_path: Path) -> list[dict[str, Any]]:
-        pass
-
-
-class RidSubprocessRuntime:
-    def __init__(
-        self,
-        python_executable: str,
-        timeout_seconds: float,
-        script_path: Path | None = None,
-    ) -> None:
-        self.python_executable = python_executable
-        self.timeout_seconds = timeout_seconds
-        self.script_path = script_path or Path(__file__).with_name("rid_runtime_cli.py")
-
-    def detect_obstructions(self, image_path: Path) -> list[dict[str, Any]]:
-        try:
-            completed = subprocess.run(
-                [self.python_executable, str(self.script_path), str(image_path)],
-                capture_output=True,
-                text=True,
-                timeout=self.timeout_seconds,
-                check=False,
-            )
-        except FileNotFoundError as exc:
-            raise RoofObstructionRuntimeError(
-                f"RID runtime Python executable was not found: {self.python_executable}."
-            ) from exc
-        except subprocess.TimeoutExpired as exc:
-            raise RoofObstructionRuntimeError("RID obstruction detection timed out.") from exc
-
-        if completed.returncode != 0:
-            detail = completed.stderr.strip() or completed.stdout.strip() or "unknown runtime error"
-            raise RoofObstructionRuntimeError(f"RID obstruction detection failed: {detail}")
-
-        json_line = self._last_json_line(completed.stdout)
-        if json_line is None:
-            raise RoofObstructionRuntimeError("RID obstruction detection returned malformed JSON.")
-
-        try:
-            payload = json.loads(json_line)
-        except ValueError as exc:
-            raise RoofObstructionRuntimeError("RID obstruction detection returned malformed JSON.") from exc
-
-        obstructions = payload.get("obstructions")
-        if not isinstance(obstructions, list):
-            raise RoofObstructionRuntimeError("RID obstruction detection returned malformed data.")
-        return [item for item in obstructions if isinstance(item, dict)]
-
-    def _last_json_line(self, output: str) -> str | None:
-        for line in reversed(output.splitlines()):
-            candidate = line.strip()
-            if candidate.startswith("{") and candidate.endswith("}"):
-                return candidate
-        return None
 
 
 class RoofObstructionService:
     def __init__(
         self,
         roof_analysis_service: RoofAnalysisService,
-        runtime: ObstructionRuntime,
+        detector: RoofObstructionDetector,
         *,
         crop_padding_pixels: int = 8,
         min_confidence: float = 0.5,
         min_area_pixels: float = 50.0,
     ) -> None:
         self.roof_analysis_service = roof_analysis_service
-        self.runtime = runtime
+        self.detector = detector
         self.crop_padding_pixels = crop_padding_pixels
         self.min_confidence = min_confidence
         self.min_area_pixels = min_area_pixels
@@ -118,7 +58,7 @@ class RoofObstructionService:
         crop = self._crop_selected_roof(image_path, selection)
 
         try:
-            raw_obstructions = self.runtime.detect_obstructions(crop.path)
+            raw_obstructions = self.detector.detect(crop.path)
         except RoofObstructionRuntimeError as exc:
             raise HTTPException(status_code=503, detail=str(exc)) from exc
 
@@ -173,7 +113,7 @@ class RoofObstructionService:
 
     def _map_and_filter_obstructions(
         self,
-        raw_obstructions: list[dict[str, Any]],
+        raw_obstructions: list[RawObstructionDetection],
         *,
         selected_roof: SelectedRoof,
         offset_x: int,
@@ -183,16 +123,16 @@ class RoofObstructionService:
     ) -> list[RoofObstruction]:
         obstructions: list[RoofObstruction] = []
         for raw in raw_obstructions:
-            class_name = raw.get("class_name") or raw.get("class")
+            class_name = raw.class_name
             if class_name not in RID_OBSTRUCTION_CLASSES:
                 continue
 
-            confidence = self._optional_float(raw.get("confidence"))
+            confidence = self._optional_float(raw.confidence)
             if confidence is not None and confidence < self.min_confidence:
                 continue
 
             crop_polygon = self._normalize_crop_polygon(
-                raw.get("polygon_pixels"),
+                raw.polygon_pixels,
                 width=crop_width,
                 height=crop_height,
             )
@@ -200,7 +140,7 @@ class RoofObstructionService:
                 continue
 
             full_polygon = [[x + offset_x, y + offset_y] for x, y in crop_polygon]
-            area_pixels = self._optional_float(raw.get("area_pixels"))
+            area_pixels = self._optional_float(raw.area_pixels)
             if area_pixels is None:
                 area_pixels = self._polygon_area(full_polygon)
             if area_pixels < self.min_area_pixels:
@@ -315,13 +255,15 @@ class _RoofCrop:
 
 
 def get_roof_obstruction_service() -> RoofObstructionService:
-    runtime = RidSubprocessRuntime(
-        python_executable=settings.rid_runtime_python,
-        timeout_seconds=settings.rid_runtime_timeout_seconds,
+    detector = RidInProcessDetector(
+        checkpoint_path=settings.rid_model_checkpoint_path,
+        inference_image_size=settings.rid_inference_image_size,
+        device=settings.rid_device,
+        min_polygon_area_pixels=settings.rid_min_polygon_area_pixels,
     )
     return RoofObstructionService(
         get_roof_analysis_service(),
-        runtime,
+        detector,
         crop_padding_pixels=settings.roof_obstruction_crop_padding_pixels,
         min_confidence=settings.roof_obstruction_min_confidence,
         min_area_pixels=settings.roof_obstruction_min_area_pixels,
