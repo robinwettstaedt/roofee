@@ -215,7 +215,7 @@ flowchart TD
    }
    ```
 
-   The backend revalidates the selected roof, crops the selected roof area from the overhead image, calls the isolated RID U-Net runtime, maps returned obstruction polygons back to full-image pixels, and returns the focused roof plus obstruction polygons:
+   The backend revalidates the selected roof, crops the selected roof area from the overhead image, runs the RID U-Net detector inside the backend process, maps returned obstruction polygons back to full-image pixels, and returns the focused roof plus obstruction polygons:
 
    ```json
    {
@@ -244,7 +244,7 @@ flowchart TD
    }
    ```
 
-   The RID runtime is intentionally separated from the backend Python process. Configure `ROOFEE_RID_RUNTIME_PYTHON` to point at a Python 3.10 environment with the RID dependencies installed.
+   The RID detector loads `backend/models/obstruction_detection/rid_unet_resnet34_best.h5` lazily on the first obstruction request and keeps the model in memory for the backend process. Configure `ROOFEE_RID_MODEL_CHECKPOINT_PATH` if the checkpoint is mounted somewhere else. The original RID runtime uses TensorFlow 2.10 and `segmentation-models==1.0.1`; run the backend with a compatible Python/TensorFlow environment when enabling real obstruction inference. Normal route and service tests use fake detectors and do not load the model.
 
    Roof-to-3D registration contract:
 
@@ -391,7 +391,7 @@ The backend is organized around service responsibilities rather than one large c
 
 - `RoofObstructionService`
   - Crops the selected roof area from the overhead image.
-  - Calls the isolated RID U-Net runtime outside the backend Python process.
+  - Calls the backend-local RID U-Net detector abstraction.
   - Maps obstruction polygons from crop pixels back to full-image pixels.
   - Filters ignored classes, low-confidence detections, tiny polygons, and detections outside the selected roof.
 
@@ -483,6 +483,29 @@ uvicorn app.main:app --reload
 ```
 
 The API runs on `http://localhost:8000` by default.
+
+RID obstruction detection runs in-process. The default checkpoint path is
+`models/obstruction_detection/rid_unet_resnet34_best.h5` relative to the
+backend directory. Relevant config:
+
+```bash
+ROOFEE_RID_MODEL_CHECKPOINT_PATH="models/obstruction_detection/rid_unet_resnet34_best.h5"
+ROOFEE_RID_INFERENCE_IMAGE_SIZE=512
+ROOFEE_RID_DEVICE=""  # use "cpu" to hide GPUs, or a TensorFlow device string
+ROOFEE_RID_MIN_POLYGON_AREA_PIXELS=50
+ROOFEE_ROOF_OBSTRUCTION_MIN_CONFIDENCE=0.5
+```
+
+To install the original RID dependencies in a compatible environment:
+
+```bash
+pip install -e ".[dev,rid]"
+```
+
+The bundled checkpoint was trained with TensorFlow 2.10, which is intended for
+Python 3.10 or older. If the backend runs on a newer Python, the service still
+starts, but real obstruction detection returns a `503` until compatible RID ML
+dependencies are installed or the model is converted to a newer runtime.
 
 ## Structure
 

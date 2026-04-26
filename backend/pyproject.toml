@@ -6,7 +6,7 @@ build-backend = "hatchling.build"
 name = "roofee-backend"
 version = "0.1.0"
 description = "FastAPI backend for Roofee."
-requires-python = ">=3.11"
+requires-python = ">=3.10"
 dependencies = [
   "fastapi>=0.115.0",
   "imagecodecs>=2024.9.22",
@@ -28,6 +28,11 @@ dev = [
 vision = [
   "huggingface-hub>=0.24.0",
   "ultralytics>=8.3.0"
+]
+rid = [
+  "numpy<2",
+  "segmentation-models==1.0.1",
+  "tensorflow==2.10.0; python_version < '3.11'"
 ]
 
 [tool.hatch.build.targets.wheel]

@@ -1,5 +1,4 @@
 from pathlib import Path
-from typing import Any
 
 import pytest
 from fastapi import HTTPException
@@ -7,6 +6,7 @@ from PIL import Image
 
 from app.models.roof import BoundingBoxPixels, RoofObstructionRequest, RoofOutline
 from app.services.roof.obstruction_service import RoofObstructionService
+from app.services.roof.rid_detector import RawObstructionDetection
 from app.services.roof.roof_analysis_service import RoofAnalysisService
 
 
@@ -43,48 +43,48 @@ class FakeHouseDataService:
         return self.image_path
 
 
-class FakeRidRuntime:
+class FakeRidDetector:
     def __init__(self) -> None:
         self.image_path: Path | None = None
 
-    def detect_obstructions(self, image_path: Path) -> list[dict[str, Any]]:
+    def detect(self, image_path: Path) -> list[RawObstructionDetection]:
         self.image_path = image_path
         return [
-            {
-                "class": "chimney",
-                "polygon_pixels": [[5, 5], [15, 5], [15, 15], [5, 15]],
-                "area_pixels": 100,
-                "confidence": 0.834,
-            },
-            {
-                "class": "window",
-                "polygon_pixels": [[20, 20], [28, 20], [28, 28], [20, 28]],
-                "area_pixels": 64,
-                "confidence": 0.2,
-            },
-            {
-                "class": "dormer",
-                "polygon_pixels": [[30, 30], [33, 30], [33, 33], [30, 33]],
-                "area_pixels": 9,
-                "confidence": 0.9,
-            },
-            {
-                "class": "tree",
-                "polygon_pixels": [[5, 5], [15, 5], [15, 15], [5, 15]],
-                "area_pixels": 100,
-                "confidence": 0.9,
-            },
+            RawObstructionDetection(
+                class_name="chimney",
+                polygon_pixels=[[5, 5], [15, 5], [15, 15], [5, 15]],
+                area_pixels=100,
+                confidence=0.834,
+            ),
+            RawObstructionDetection(
+                class_name="window",
+                polygon_pixels=[[20, 20], [28, 20], [28, 28], [20, 28]],
+                area_pixels=64,
+                confidence=0.2,
+            ),
+            RawObstructionDetection(
+                class_name="dormer",
+                polygon_pixels=[[30, 30], [33, 30], [33, 33], [30, 33]],
+                area_pixels=9,
+                confidence=0.9,
+            ),
+            RawObstructionDetection(
+                class_name="tree",
+                polygon_pixels=[[5, 5], [15, 5], [15, 15], [5, 15]],
+                area_pixels=100,
+                confidence=0.9,
+            ),
         ]
 
 
 def test_roof_obstruction_service_maps_crop_coordinates_to_full_image(tmp_path: Path) -> None:
     image_path = tmp_path / "overhead.png"
     Image.new("RGB", (100, 100), "white").save(image_path)
-    runtime = FakeRidRuntime()
+    detector = FakeRidDetector()
 
     response = RoofObstructionService(
         RoofAnalysisService(FakeBuildingOutlineService()),
-        runtime,
+        detector,
         crop_padding_pixels=5,
         min_confidence=0.5,
         min_area_pixels=50,
@@ -96,8 +96,8 @@ def test_roof_obstruction_service_maps_crop_coordinates_to_full_image(tmp_path: 
         FakeHouseDataService(image_path),
     )
 
-    assert runtime.image_path is not None
-    with Image.open(runtime.image_path) as crop:
+    assert detector.image_path is not None
+    with Image.open(detector.image_path) as crop:
         assert crop.size == (21, 21)
 
     assert response.status == "analyzed"
@@ -126,7 +126,7 @@ def test_roof_obstruction_service_rejects_invalid_selected_roof_ids(tmp_path: Pa
     with pytest.raises(HTTPException) as exc:
         RoofObstructionService(
             RoofAnalysisService(FakeBuildingOutlineService()),
-            FakeRidRuntime(),
+            FakeRidDetector(),
         ).analyze_obstructions(
             RoofObstructionRequest(
                 satellite_image_url="/api/house-assets/test-asset/overhead.png",
