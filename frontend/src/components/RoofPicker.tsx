@@ -3,11 +3,89 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import type { RoofAnalysis, RoofOutline } from "@/types/roof";
 
 /**
- * Lets the user click the building they want to design panels for. Renders
+ * Lets the user click the buildings they want to design panels for. Renders
  * the satellite image returned by /api/recommendations with each detected
- * roof outline as a clickable polygon overlay. Selection is single-roof for
- * V1 — clicking a different polygon replaces the previous selection.
+ * roof outline as a clickable polygon overlay. Multi-select: click toggles.
+ *
+ * Each candidate gets its own hue from PALETTE so the user can tell them
+ * apart at a glance ("I'll click the teal one"). Selected buildings flip to
+ * signal-orange + a glow so they read as a different kind of thing on screen.
+ * Vertices are RDP-simplified before render so polygons look smooth, not
+ * grizzly from segmentation noise.
  */
+
+const C = {
+  ink: "24, 23, 21",
+  signal: "232, 90, 44",
+  paperDeep: "#ece8de",
+  paper: "#f7f5f0",
+} as const;
+
+// Per-candidate palette. All cool / jewel tones — zero overlap with the
+// signal-orange selected state, so flipping a candidate to selected reads
+// as a real state change, not just "another colored polygon".
+const PALETTE = [
+  { name: "teal", rgb: "20, 168, 156" },
+  { name: "indigo", rgb: "94, 123, 232" },
+  { name: "sky", rgb: "43, 179, 224" },
+  { name: "plum", rgb: "160, 94, 212" },
+  { name: "emerald", rgb: "43, 184, 123" },
+  { name: "violet", rgb: "118, 92, 224" },
+] as const;
+
+function colorFor(index: number): string {
+  return PALETTE[index % PALETTE.length].rgb;
+}
+
+// Ramer–Douglas–Peucker line simplification. Used to clean up the noisy
+// vertex output from YOLOv8 segmentation so polygons look smooth instead
+// of grizzly. Epsilon controls how aggressively we drop near-collinear points.
+function simplifyPath(
+  points: number[][],
+  epsilon: number,
+): [number, number][] {
+  const pairs: [number, number][] = points
+    .filter((p) => p.length >= 2)
+    .map((p) => [p[0], p[1]]);
+  if (pairs.length < 4 || epsilon <= 0) return pairs;
+  return rdp(pairs, epsilon);
+}
+
+function rdp(
+  points: [number, number][],
+  epsilon: number,
+): [number, number][] {
+  if (points.length < 3) return points;
+  let dmax = 0;
+  let index = 0;
+  const end = points.length - 1;
+  for (let i = 1; i < end; i++) {
+    const d = perpDist(points[i], points[0], points[end]);
+    if (d > dmax) {
+      dmax = d;
+      index = i;
+    }
+  }
+  if (dmax > epsilon) {
+    const left = rdp(points.slice(0, index + 1), epsilon);
+    const right = rdp(points.slice(index), epsilon);
+    return [...left.slice(0, -1), ...right];
+  }
+  return [points[0], points[end]];
+}
+
+function perpDist(
+  p: [number, number],
+  a: [number, number],
+  b: [number, number],
+): number {
+  const dx = b[0] - a[0];
+  const dy = b[1] - a[1];
+  if (dx === 0 && dy === 0) return Math.hypot(p[0] - a[0], p[1] - a[1]);
+  const num = Math.abs(dy * p[0] - dx * p[1] + b[0] * a[1] - b[1] * a[0]);
+  return num / Math.hypot(dx, dy);
+}
+
 export function RoofPicker({
   roofAnalysis,
   address,
@@ -26,24 +104,34 @@ export function RoofPicker({
   const outlines = roofAnalysis.roof_outlines;
   const imageUrl = roofAnalysis.satellite_image_url ?? null;
 
+  // Rank once: largest * most-confident first. Indexes drive the "01", "02"
+  // captions and the stagger animation, so the auto-suggested roof reads "01".
+  const ranked = useMemo(() => rankOutlines(outlines), [outlines]);
+
   const [selectedIds, setSelectedIds] = useState<Set<string>>(() => new Set());
+  const [hoveredId, setHoveredId] = useState<string | null>(null);
   const [imgSize, setImgSize] = useState<{ w: number; h: number } | null>(null);
   const imgRef = useRef<HTMLImageElement>(null);
+  const didPreselect = useRef(false);
 
-  // Pick the largest, most-confident outline as the default suggestion.
-  const suggestedOutline = useMemo(() => suggestPrimary(outlines), [outlines]);
-
+  // Preselect the building under the geocoded pin (image center). If the
+  // center falls inside a polygon, that's almost certainly the user's house;
+  // otherwise pick the candidate whose centroid is closest. Far better than
+  // "biggest building", which routinely picks a neighbour.
   useEffect(() => {
-    if (suggestedOutline && selectedIds.size === 0) {
-      setSelectedIds(new Set([suggestedOutline.id]));
+    if (didPreselect.current) return;
+    if (!imgSize || outlines.length === 0) return;
+    const id = pickInitialId(outlines, imgSize.w, imgSize.h);
+    if (id) {
+      setSelectedIds(new Set([id]));
+      didPreselect.current = true;
     }
-  }, [suggestedOutline, selectedIds.size]);
+  }, [imgSize, outlines]);
 
   function toggle(id: string) {
     setSelectedIds((prev) => {
-      // V1: single-select. Click same → keep. Click other → replace.
-      const next = new Set<string>();
-      if (!prev.has(id)) next.add(id);
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
       else next.add(id);
       return next;
     });
@@ -59,6 +147,7 @@ export function RoofPicker({
   }
 
   const canConfirm = selectedIds.size > 0 && !loading;
+  const anySelected = selectedIds.size > 0;
 
   return (
     <div className="flex h-screen w-screen flex-col">
@@ -110,14 +199,28 @@ export function RoofPicker({
                     className="absolute inset-0 h-full w-full"
                     style={{ pointerEvents: "none" }}
                   >
-                    {outlines.map((o) => {
+                    <defs>
+                      <style>{markupKeyframes}</style>
+                    </defs>
+                    {ranked.map((o, i) => {
                       const selected = selectedIds.has(o.id);
+                      const hovered = hoveredId === o.id;
+                      const dimmed = anySelected && !selected && !hovered;
                       return (
                         <Outline
                           key={o.id}
                           outline={o}
+                          index={i}
+                          color={colorFor(i)}
                           selected={selected}
+                          hovered={hovered}
+                          dimmed={dimmed}
+                          imgWidth={imgSize.w}
                           onClick={() => toggle(o.id)}
+                          onEnter={() => setHoveredId(o.id)}
+                          onLeave={() =>
+                            setHoveredId((cur) => (cur === o.id ? null : cur))
+                          }
                         />
                       );
                     })}
@@ -138,10 +241,8 @@ export function RoofPicker({
           <footer className="mt-6 flex items-center justify-between">
             <p className="text-[12px] text-dust">
               {selectedIds.size === 0
-                ? "Click a building to select."
-                : `${selectedIds.size} selected${
-                    selectedIds.size > 1 ? " — must be touching" : ""
-                  }`}
+                ? "Click buildings to select. Click again to deselect."
+                : `${selectedIds.size} ${selectedIds.size === 1 ? "building" : "buildings"} selected`}
             </p>
             <button
               type="button"
@@ -159,7 +260,7 @@ export function RoofPicker({
                 </>
               ) : (
                 <>
-                  Use this roof
+                  {selectedIds.size > 1 ? "Use these roofs" : "Use this roof"}
                   <span aria-hidden>→</span>
                 </>
               )}
@@ -173,52 +274,211 @@ export function RoofPicker({
 
 function Outline({
   outline,
+  index,
+  color,
   selected,
+  hovered,
+  dimmed,
+  imgWidth,
   onClick,
+  onEnter,
+  onLeave,
 }: {
   outline: RoofOutline;
+  index: number;
+  color: string;
   selected: boolean;
+  hovered: boolean;
+  dimmed: boolean;
+  imgWidth: number;
   onClick: () => void;
+  onEnter: () => void;
+  onLeave: () => void;
 }) {
-  const points = outline.polygon_pixels
-    .map(([x, y]) => `${x},${y}`)
-    .join(" ");
+  const bb = outline.bounding_box_pixels;
+  const w = bb.x_max - bb.x_min;
+  const h = bb.y_max - bb.y_min;
 
-  // Stroke + fill scale up when selected.
-  const fill = selected ? "rgba(232, 90, 44, 0.32)" : "rgba(24, 23, 21, 0.12)";
-  const stroke = selected ? "#e85a2c" : "rgba(24, 23, 21, 0.55)";
-  const strokeWidth = selected ? 4 : 2;
+  // Smooth out segmentation noise: epsilon scales with bbox so it works at
+  // any image resolution. ~1.5% of the larger dimension drops jaggies without
+  // chopping off real corners.
+  const points = useMemo(() => {
+    const eps = Math.max(w, h) * 0.015;
+    return simplifyPath(outline.polygon_pixels, eps)
+      .map(([x, y]) => `${x},${y}`)
+      .join(" ");
+  }, [outline.polygon_pixels, w, h]);
+
+  // Polygon fill / stroke per state.
+  let fill: string;
+  let stroke: string;
+  let strokeWidth: number;
+  let polyFilter: string | undefined;
+
+  // Pattern: candidates are OUTLINED (stroke only). Selected is the only one
+  // that's FILLED. This avoids low-alpha fills bleeding the underlying roof
+  // color through (reddish tiles can make a cool-hue overlay read warm), and
+  // makes the "you picked this" state unambiguous regardless of imagery.
+  if (selected) {
+    fill = `rgba(${C.signal}, 0.55)`;
+    stroke = `rgb(${C.signal})`;
+    strokeWidth = 4.5;
+    polyFilter = `drop-shadow(0 0 3px rgba(${C.signal}, 0.95)) drop-shadow(0 0 14px rgba(${C.signal}, 0.55))`;
+  } else if (hovered) {
+    fill = `rgba(${color}, 0.22)`;
+    stroke = `rgb(${color})`;
+    strokeWidth = 3;
+  } else if (dimmed) {
+    fill = "transparent";
+    stroke = `rgba(${color}, 0.55)`;
+    strokeWidth = 1.5;
+  } else {
+    fill = "transparent";
+    stroke = `rgb(${color})`;
+    strokeWidth = 2.25;
+  }
+
+  const labelText = String(index + 1).padStart(2, "0");
+
+  // Caption sizing: image-pixel units (SVG viewBox). Scale with image width so
+  // it reads at a similar physical size across image resolutions.
+  const captionFontSize = Math.max(10, imgWidth * 0.014);
+  const captionPad = captionFontSize * 0.5;
+  const captionH = captionFontSize * 1.7;
+  const captionW = captionFontSize * 2.4;
+  const captionX = bb.x_min;
+  const captionY = bb.y_min - captionH - 4;
+
+  // Pill only shows while hovered and not yet selected — once selected, the
+  // orange polygon is enough; no label needed.
+  const showCaption = hovered && !selected;
+
+  const groupStyle: React.CSSProperties = {
+    pointerEvents: "auto",
+    cursor: "pointer",
+  };
 
   return (
-    <g style={{ pointerEvents: "auto", cursor: "pointer" }} onClick={onClick}>
-      {/* Invisible expanded hit-area: the bounding box, so small polygons stay clickable */}
+    <g
+      style={groupStyle}
+      onClick={onClick}
+      onMouseEnter={onEnter}
+      onMouseLeave={onLeave}
+    >
+      {/* Hit-area: bbox so small polygons remain clickable */}
       <rect
-        x={outline.bounding_box_pixels.x_min}
-        y={outline.bounding_box_pixels.y_min}
-        width={outline.bounding_box_pixels.x_max - outline.bounding_box_pixels.x_min}
-        height={
-          outline.bounding_box_pixels.y_max - outline.bounding_box_pixels.y_min
-        }
+        x={bb.x_min}
+        y={bb.y_min}
+        width={w}
+        height={h}
         fill="transparent"
       />
+
+      {/* Polygon fill + outline */}
       <polygon
         points={points}
         fill={fill}
         stroke={stroke}
         strokeWidth={strokeWidth}
         strokeLinejoin="round"
-        style={{ transition: "fill 160ms ease, stroke 160ms ease" }}
+        strokeLinecap="round"
+        style={{
+          transition:
+            "fill 160ms ease, stroke 160ms ease, stroke-width 160ms ease, filter 200ms ease",
+          filter: polyFilter,
+        }}
       />
+
+      {/* Index pill — only on hover for unselected candidates */}
+      {showCaption && (
+        <g
+          style={{
+            animation: "roofee-cap-in 180ms ease-out both",
+          }}
+        >
+          <rect
+            x={captionX}
+            y={captionY}
+            width={captionW}
+            height={captionH}
+            rx={2}
+            ry={2}
+            fill={`rgb(${color})`}
+            stroke={`rgb(${color})`}
+            strokeWidth={1}
+          />
+          <text
+            x={captionX + captionPad}
+            y={captionY + captionH / 2}
+            dominantBaseline="middle"
+            fontFamily="var(--font-mono), ui-monospace, monospace"
+            fontSize={captionFontSize}
+            letterSpacing="0.08em"
+            fill={C.paper}
+            style={{ fontVariantNumeric: "tabular-nums" }}
+          >
+            {labelText}
+          </text>
+        </g>
+      )}
     </g>
   );
 }
 
-function suggestPrimary(outlines: RoofOutline[]): RoofOutline | null {
-  if (outlines.length === 0) return null;
-  // Prefer the outline with highest (area * confidence). Confidence may be null.
+// CSS injected once into the SVG <defs> for caption mount.
+const markupKeyframes = `
+  @keyframes roofee-cap-in {
+    from { opacity: 0; transform: translateY(2px); }
+    to   { opacity: 1; transform: translateY(0); }
+  }
+`;
+
+function rankOutlines(outlines: RoofOutline[]): RoofOutline[] {
+  // Largest * most-confident first. Confidence may be null → treat as 0.5.
   return [...outlines].sort((a, b) => {
-    const score = (o: RoofOutline) =>
-      o.area_pixels * (o.confidence ?? 0.5);
+    const score = (o: RoofOutline) => o.area_pixels * (o.confidence ?? 0.5);
     return score(b) - score(a);
-  })[0];
+  });
+}
+
+function pickInitialId(
+  outlines: RoofOutline[],
+  imgW: number,
+  imgH: number,
+): string | null {
+  if (outlines.length === 0) return null;
+  const cx = imgW / 2;
+  const cy = imgH / 2;
+  // 1. Address pin lands inside one of the polygons → that's the house.
+  for (const o of outlines) {
+    if (pointInPolygon(cx, cy, o.polygon_pixels)) return o.id;
+  }
+  // 2. Otherwise pick the candidate whose centroid is closest to the pin.
+  let bestId: string | null = null;
+  let bestDist = Infinity;
+  for (const o of outlines) {
+    const bb = o.bounding_box_pixels;
+    const ox = (bb.x_min + bb.x_max) / 2;
+    const oy = (bb.y_min + bb.y_max) / 2;
+    const d = Math.hypot(ox - cx, oy - cy);
+    if (d < bestDist) {
+      bestDist = d;
+      bestId = o.id;
+    }
+  }
+  return bestId;
+}
+
+function pointInPolygon(x: number, y: number, polygon: number[][]): boolean {
+  let inside = false;
+  for (let i = 0, j = polygon.length - 1; i < polygon.length; j = i++) {
+    const xi = polygon[i][0];
+    const yi = polygon[i][1];
+    const xj = polygon[j][0];
+    const yj = polygon[j][1];
+    const intersect =
+      yi > y !== yj > y && x < ((xj - xi) * (y - yi)) / (yj - yi) + xi;
+    if (intersect) inside = !inside;
+  }
+  return inside;
 }
