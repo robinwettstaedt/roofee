@@ -3,6 +3,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { AddressIntake } from "./AddressIntake";
 import { Designer } from "./Designer";
 import { ProcessingNarrative } from "./ProcessingNarrative";
+import { RoofPicker } from "./RoofPicker";
 import type { PlacementOverride } from "./RoofPlacedPanels";
 import {
   dimensionsFor,
@@ -17,6 +18,12 @@ import type {
   HouseModelMetadata,
   RecommendationValidationResponse,
 } from "@/types/recommendation";
+import type {
+  RoofObstruction,
+  RoofObstructionAnalysis,
+  RoofSelectionResponse,
+  SelectedRoof,
+} from "@/types/roof";
 
 const HOUSE_GLB = "/house.glb";
 
@@ -53,7 +60,7 @@ function loadStoredPlacement(): PlacementOverride {
   return DEFAULT_PLACEMENT;
 }
 
-type View = "intake" | "thinking" | "designer";
+type View = "intake" | "thinking" | "picking-roof" | "selecting-roof" | "designer";
 
 type PendingPayload = {
   design: DesignResponse;
@@ -67,6 +74,9 @@ export default function DesignerApp() {
   const [response, setResponse] = useState<DesignResponse | null>(null);
   const [recommendation, setRecommendation] =
     useState<RecommendationValidationResponse | null>(null);
+  const [selectedRoof, setSelectedRoof] = useState<SelectedRoof | null>(null);
+  const [obstructions, setObstructions] = useState<RoofObstruction[]>([]);
+  const [roofPickerError, setRoofPickerError] = useState<string | null>(null);
   const [houseGlbUrl, setHouseGlbUrl] = useState<string | null>(null);
   const [catalogPanel, setCatalogPanel] = useState<CatalogComponent | null>(null);
   const [placement, setPlacement] = useState<PlacementOverride>(DEFAULT_PLACEMENT);
@@ -175,19 +185,105 @@ export default function DesignerApp() {
     }
   }, []);
 
+  const confirmRoofSelection = useCallback(
+    async (
+      satelliteImageUrl: string,
+      selectedIds: string[],
+    ): Promise<boolean> => {
+      setView("selecting-roof");
+      setRoofPickerError(null);
+      try {
+        const [selectionRes, obstructionsRes] = await Promise.all([
+          fetch("/api/roof/selection", {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify({
+              satellite_image_url: satelliteImageUrl,
+              selected_roof_outline_ids: selectedIds,
+            }),
+          }),
+          fetch("/api/roof/obstructions", {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify({
+              satellite_image_url: satelliteImageUrl,
+              selected_roof_outline_ids: selectedIds,
+            }),
+          }),
+        ]);
+
+        if (!selectionRes.ok) {
+          const detail = await selectionRes.text();
+          console.error(
+            "[DesignerApp] /api/roof/selection failed",
+            selectionRes.status,
+            detail,
+          );
+          setRoofPickerError(
+            "We couldn't lock in that selection — try a different building.",
+          );
+          setView("picking-roof");
+          return false;
+        }
+
+        const selection = (await selectionRes.json()) as RoofSelectionResponse;
+        setSelectedRoof(selection.selected_roof);
+
+        if (obstructionsRes.ok) {
+          const obs = (await obstructionsRes.json()) as RoofObstructionAnalysis;
+          setObstructions(obs.obstructions);
+        } else {
+          // Obstruction analysis is best-effort; absence shouldn't block flow.
+          setObstructions([]);
+          console.warn(
+            "[DesignerApp] /api/roof/obstructions failed:",
+            obstructionsRes.status,
+            await obstructionsRes.text(),
+          );
+        }
+
+        setView("designer");
+        return true;
+      } catch (err) {
+        console.error("[DesignerApp] roof confirmation threw:", err);
+        setRoofPickerError("Network hiccup — please try again.");
+        setView("picking-roof");
+        return false;
+      }
+    },
+    [],
+  );
+
   const handleNarrativeDone = useCallback(() => {
-    if (pendingPayload) {
-      setResponse(pendingPayload.design);
-      setRecommendation(pendingPayload.recommendation);
-      // Revoke the previous Blob URL when we replace it.
-      if (previousGlbUrl.current) URL.revokeObjectURL(previousGlbUrl.current);
-      previousGlbUrl.current = pendingPayload.houseGlbUrl;
-      setHouseGlbUrl(pendingPayload.houseGlbUrl);
-      setView("designer");
-    } else {
+    if (!pendingPayload) {
       setView("intake");
+      return;
     }
-  }, [pendingPayload]);
+    setResponse(pendingPayload.design);
+    setRecommendation(pendingPayload.recommendation);
+    // Revoke the previous Blob URL when we replace it.
+    if (previousGlbUrl.current) URL.revokeObjectURL(previousGlbUrl.current);
+    previousGlbUrl.current = pendingPayload.houseGlbUrl;
+    setHouseGlbUrl(pendingPayload.houseGlbUrl);
+
+    // Decide whether the user needs to disambiguate the building.
+    const roofAnalysis = pendingPayload.recommendation?.roof_analysis;
+    const outlines = roofAnalysis?.roof_outlines ?? [];
+    const satellite = roofAnalysis?.satellite_image_url ?? null;
+
+    if (outlines.length >= 1 && satellite) {
+      setSelectedRoof(null);
+      setObstructions([]);
+      setRoofPickerError(null);
+      setView("picking-roof");
+      return;
+    }
+
+    // Zero outlines or no satellite image — degrade gracefully and skip the picker.
+    setSelectedRoof(null);
+    setObstructions([]);
+    setView("designer");
+  }, [pendingPayload, confirmRoofSelection]);
 
   // Clean up the Blob URL on unmount so we don't leak memory.
   useEffect(() => {
@@ -204,19 +300,39 @@ export default function DesignerApp() {
 
   if (view === "designer" && response) {
     return (
-      <>
-        <Designer
-          response={response}
-          baseDesign={response.design}
-          panelDims={panelDims}
-          modelUrl={houseGlbUrl ?? HOUSE_GLB}
-          placementOverride={placement}
-          onPlacementChange={setPlacement}
-          onPlacementReset={() => setPlacement(DEFAULT_PLACEMENT)}
-          recommendation={recommendation}
-          onBack={handleBack}
-        />
-      </>
+      <Designer
+        response={response}
+        baseDesign={response.design}
+        panelDims={panelDims}
+        modelUrl={houseGlbUrl ?? HOUSE_GLB}
+        placementOverride={placement}
+        onPlacementChange={setPlacement}
+        onPlacementReset={() => setPlacement(DEFAULT_PLACEMENT)}
+        recommendation={recommendation}
+        selectedRoof={selectedRoof}
+        obstructions={obstructions}
+        onBack={handleBack}
+      />
+    );
+  }
+
+  if (
+    (view === "picking-roof" || view === "selecting-roof") &&
+    recommendation?.roof_analysis &&
+    recommendation.roof_analysis.satellite_image_url
+  ) {
+    const ra = recommendation.roof_analysis;
+    return (
+      <RoofPicker
+        roofAnalysis={ra}
+        address={recommendation.input.address}
+        loading={view === "selecting-roof"}
+        error={roofPickerError}
+        onConfirm={(ids) =>
+          void confirmRoofSelection(ra.satellite_image_url ?? "", ids)
+        }
+        onBack={handleBack}
+      />
     );
   }
 
@@ -227,7 +343,10 @@ export default function DesignerApp() {
         disabled={view === "thinking"}
       />
       {view === "thinking" && (
-        <ProcessingNarrative onDone={handleNarrativeDone} />
+        <ProcessingNarrative
+          onDone={handleNarrativeDone}
+          ready={pendingPayload !== null}
+        />
       )}
     </>
   );

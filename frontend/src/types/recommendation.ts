@@ -1,6 +1,8 @@
 // Mirror of backend/app/models/recommendation.py — keep in sync.
 // String literal unions stand in for the backend StrEnums.
 
+import type { RoofAnalysis } from "./roof";
+
 export type RecommendationGoal =
   | "balanced"
   | "lowest_upfront_cost"
@@ -163,6 +165,7 @@ export type RecommendationValidationResponse = {
   model_file: ModelFileValidation;
   solar_weather?: SolarWeatherMetadata | null;
   house_data?: HouseData | null;
+  roof_analysis?: RoofAnalysis | null;
 };
 
 // Metadata from POST /api/location/house-model — emitted in `Roofee-Metadata`

@@ -12,12 +12,20 @@ const STEPS = [
   "Composing the bill of materials",
 ];
 
-export function ProcessingNarrative({ onDone }: { onDone: () => void }) {
+export function ProcessingNarrative({
+  onDone,
+  ready = true,
+}: {
+  onDone: () => void;
+  ready?: boolean;
+}) {
   const [doneCount, setDoneCount] = useState(0);
   const [fadingOut, setFadingOut] = useState(false);
 
   useEffect(() => {
     if (doneCount >= STEPS.length) {
+      // Animation finished — wait until upstream work is ready before fading out.
+      if (!ready) return;
       const t = setTimeout(() => {
         setFadingOut(true);
         const t2 = setTimeout(onDone, 320);
@@ -25,9 +33,12 @@ export function ProcessingNarrative({ onDone }: { onDone: () => void }) {
       }, 280);
       return () => clearTimeout(t);
     }
+    // Hold on the second-to-last step until ready, so progress doesn't pin at 100%
+    // before the fade-out can fire.
+    if (doneCount === STEPS.length - 1 && !ready) return;
     const t = setTimeout(() => setDoneCount((c) => c + 1), 540);
     return () => clearTimeout(t);
-  }, [doneCount, onDone]);
+  }, [doneCount, onDone, ready]);
 
   return (
     <div
