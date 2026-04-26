@@ -48,6 +48,33 @@ class FakeHouseDataService:
         return self.image_path
 
 
+class FakeMultiOutlineBuildingService:
+    def detect_outlines(self, image_path: Path) -> list[RoofOutline]:
+        return [
+            RoofOutline(
+                id="detected-roof-1",
+                source="test",
+                model_id="test-building-outline",
+                bounding_box_pixels=BoundingBoxPixels(x_min=90, y_min=120, x_max=205, y_max=300),
+                polygon_pixels=[[100, 120], [205, 115], [200, 290], [90, 300]],
+                area_pixels=20000,
+                confidence=0.9,
+            ),
+            RoofOutline(
+                id="detected-roof-2",
+                source="test",
+                model_id="test-building-outline",
+                bounding_box_pixels=BoundingBoxPixels(x_min=200, y_min=110, x_max=320, y_max=290),
+                polygon_pixels=[[205, 115], [300, 110], [320, 280], [200, 290]],
+                area_pixels=17750,
+                confidence=0.9,
+            ),
+        ]
+
+    def detect_outlines_from_image(self, image: np.ndarray) -> list[RoofOutline]:
+        return []
+
+
 def test_roof_registration_service_recovers_similarity_transform_and_maps_polygon(
     tmp_path: Path,
 ) -> None:
@@ -101,6 +128,28 @@ def test_roof_registration_service_returns_failed_status_for_low_feature_images(
     assert response.mapped_roof_polygon_pixels == []
     assert response.quality.good_matches == 0
     assert any("too few feature matches" in warning or "descriptors" in warning for warning in response.warnings)
+
+
+def test_roof_registration_service_preserves_each_selected_roof_outline(
+    tmp_path: Path,
+) -> None:
+    satellite_image, render_image, _matrix = _synthetic_registration_pair()
+    satellite_path = tmp_path / "overhead.png"
+    Image.fromarray(cv2.cvtColor(satellite_image, cv2.COLOR_BGR2RGB)).save(satellite_path)
+    _, encoded_render = cv2.imencode(".png", render_image)
+
+    response = RoofRegistrationService(
+        RoofAnalysisService(FakeMultiOutlineBuildingService()),
+    ).register_roof(
+        _registration_request(selected_ids=["roof-001", "roof-002"]),
+        bytes(encoded_render),
+        FakeHouseDataService(satellite_path),
+    )
+
+    assert response.status == "registered"
+    assert [outline.id for outline in response.mapped_roof_outlines] == ["roof-001", "roof-002"]
+    assert all(outline.render_polygon_pixels for outline in response.mapped_roof_outlines)
+    assert all(outline.model_polygon for outline in response.mapped_roof_outlines)
 
 
 def test_roof_registration_service_rejects_invalid_selected_roof_ids(tmp_path: Path) -> None:

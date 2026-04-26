@@ -17,7 +17,9 @@ dependencies = [
   "python-multipart>=0.0.9",
   "tifffile>=2024.8.30",
   "uvicorn[standard]>=0.30.0",
-  "pydantic-settings>=2.4.0"
+  "pydantic-settings>=2.4.0",
+  "shapely>=2.0.0",
+  "trimesh>=4.4.0",
 ]
 
 [project.optional-dependencies]

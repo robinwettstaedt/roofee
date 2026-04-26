@@ -15,8 +15,9 @@ flowchart TD
     D --> E["✅ Backend resolves location and fetches house data"]
     E --> F["✅ Backend fetches location-based solar and weather inputs"]
     F --> G["✅ Backend analyzes the roof"]
-    G --> R["✅ Backend registers satellite roof to 3D top-down render"]
-    R --> H["Backend checks where panels can fit"]
+    G --> R["✅ Backend registers satellite roof to backend 3D top-down render"]
+    R --> P["✅ Backend extracts roof planes and usable regions"]
+    P --> H["Backend checks where panels can fit"]
     H --> I["Backend creates good, better, and best options"]
     I --> J["Backend creates the BOM"]
     J --> K["Backend prepares the roof visual"]
@@ -309,7 +310,28 @@ flowchart TD
    }
    ```
 
-   The satellite roof polygon remains the source of truth. The returned render-pixel polygon is an alignment product for visualization and for the later pixel-to-model placement step; V1 does not use shear or homography.
+   The satellite roof polygon remains the source of truth. The returned render-pixel polygons are alignment products for visualization and for pixel-to-model placement; V1 does not use shear or homography. The response preserves each selected roof outline separately in `mapped_roof_outlines` and keeps `mapped_roof_polygon_pixels` only as a legacy convenience field.
+
+   Backend-owned roof geometry contract:
+
+   After the frontend sends the selected roof IDs, the backend can run the rest of the geometry pipeline without a frontend-supplied render:
+
+   ```http
+   POST /api/roof/geometry
+   Content-Type: application/json
+   ```
+
+   ```json
+   {
+     "satellite_image_url": "/api/house-assets/{asset_id}/overhead.png",
+     "selected_roof_outline_ids": ["roof-003"],
+     "model_radius_m": 50,
+     "roof_edge_setback_m": 0.35,
+     "obstruction_buffer_m": 0.25
+   }
+   ```
+
+   The backend loads or fetches the cached Google 3D Tiles GLB for the same house asset, generates its own deterministic top-down render, registers the selected satellite roof polygons, extracts roof planes from mesh normals, maps obstructions into model coordinates, and subtracts setbacks/obstruction buffers with Shapely. The response includes `roof_planes`, `mapped_obstructions`, `usable_regions`, and `removed_areas`; panel layout and BOM generation must consume those feasible regions instead of raw roof area.
 
 3. **Upload optional 3D model**
    - The user may optionally upload a 3D model at the start.
@@ -330,29 +352,36 @@ flowchart TD
    ✅ Implemented: V1 detects candidate building/roof outlines from the overhead image, validates a focused roof selection, and runs selected-roof obstruction detection through an isolated RID U-Net runtime. Full usable-area subtraction for panel placement remains part of the solar layout step.
 
 6. **Register the satellite roof to the 3D model**
-   - The frontend renders the loaded GLB from a fixed top-down orthographic camera.
+   - The backend loads or fetches the project GLB and renders it from a fixed top-down orthographic camera.
    - The backend aligns the satellite image to that render with translation, rotation, and uniform scale only.
-   - The selected satellite roof polygon remains the source of truth and is mapped into 3D-render pixels.
+   - The selected satellite roof polygons remain the source of truth and are mapped separately into 3D-render pixels and model `x/z` coordinates.
    - Low-confidence registration is reported with warnings instead of silently feeding panel placement.
 
-   ✅ Implemented: V1 exposes `POST /api/roof/registration`, recovers a satellite-to-render similarity transform with ORB/AKAZE + RANSAC, rejects unreliable transforms, and returns the selected roof polygon mapped onto the deterministic top-down render.
+   ✅ Implemented: V1 exposes `POST /api/roof/registration` for compatibility and `POST /api/roof/geometry` for the backend-owned flow. Registration recovers a satellite-to-render similarity transform with ORB/AKAZE + RANSAC, rejects unreliable transforms, and returns each selected roof polygon mapped onto the deterministic top-down render.
 
-7. **Find possible solar layouts**
+7. **Extract roof planes and usable roof geometry**
+   - The backend parses the GLB mesh, filters upward roof-like faces inside the selected roof footprint, and clusters connected faces by similar normals and plane offsets.
+   - Each roof plane reports footprint geometry, surface area, tilt, azimuth, source face count, and a deterministic suitability score.
+   - The backend subtracts roof-edge setbacks and buffered obstruction polygons with Shapely, preserving split free regions and traceable removed areas.
+
+   ✅ Implemented: `POST /api/roof/geometry` returns roof planes, mapped obstructions, usable regions, removed areas, and warnings. The geometry uses model-local `x/z` coordinates for V1, with `y` as the up axis.
+
+8. **Find possible solar layouts**
    - The backend looks at the available solar modules in the material catalog.
    - It checks which modules can physically fit on the usable roof area.
    - This step decides realistic panel counts and roof-plane placement options before any bill of materials is created.
 
-8. **Size the energy system**
+9. **Size the energy system**
    - The backend estimates sensible `good`, `better`, and `best` system options.
    - It considers electricity demand, roof capacity, expected PV yield, battery usefulness, heat pump needs, EV plans, and user preferences.
    - Estimated or missing inputs are reported clearly so the seller knows what should be confirmed with the customer.
 
-9. **Create the bill of materials**
+10. **Create the bill of materials**
    - The backend converts the selected system sizes into contractor-ready line items.
    - The BOM uses only components from the fixed material catalog extracted from the provided datasets.
    - The BOM includes core equipment, accessories, mounting, services, and installation-related items.
 
-10. **Prepare the visual result**
+11. **Prepare the visual result**
    - The backend maps the selected panel layout back onto the best available roof geometry.
    - The frontend can then show the seller and customer where the proposed panels would actually go.
 
