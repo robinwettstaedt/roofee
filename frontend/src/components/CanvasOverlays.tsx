@@ -22,6 +22,8 @@ export function CanvasOverlays({
   freeRoofM2 = 56,
   lat = 52.4985,
   lng = 13.3877,
+  selectedRoofAreaPixels = null,
+  obstructionCount = 0,
 }: {
   hour: number;
   onHour: (h: number) => void;
@@ -33,6 +35,8 @@ export function CanvasOverlays({
   freeRoofM2?: number;
   lat?: number;
   lng?: number;
+  selectedRoofAreaPixels?: number | null;
+  obstructionCount?: number;
 }) {
   const [pinning, setPinning] = useState(false);
 
@@ -131,6 +135,22 @@ export function CanvasOverlays({
           <span className="font-mono num text-ink">{lng.toFixed(5)}°</span>
           <span className="text-dust">free roof</span>
           <span className="font-mono num text-ink">{freeRoofM2.toFixed(1)} m²</span>
+          {selectedRoofAreaPixels != null && (
+            <>
+              <span className="text-dust">picked</span>
+              <span className="font-mono num text-ink">
+                {Math.round(selectedRoofAreaPixels).toLocaleString("de-DE")} px²
+              </span>
+            </>
+          )}
+          {obstructionCount > 0 && (
+            <>
+              <span className="text-dust">obstr.</span>
+              <span className="font-mono num text-signal">
+                {obstructionCount}
+              </span>
+            </>
+          )}
         </div>
       </div>
 
