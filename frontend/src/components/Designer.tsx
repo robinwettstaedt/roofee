@@ -12,6 +12,7 @@ import type {
   SelectedRoof,
 } from "@/types/roof";
 import { BomSidebar } from "./BomSidebar";
+import { CanvasModeToggle, type CanvasMode } from "./CanvasModeToggle";
 import { CanvasOverlays, type Note } from "./CanvasOverlays";
 import { PlacementControls } from "./PlacementControls";
 import { PresentToggle } from "./PresentToggle";
@@ -68,16 +69,19 @@ export function Designer({
       (sum, seg) => sum + (seg.area_meters2 ?? 0),
       0,
     ) ?? null;
-  const backendLayout =
-    roofGeometry?.solar_layout_options.find(
-      (option) => option.id === roofGeometry.recommended_layout_option_id,
-    ) ??
-    roofGeometry?.solar_layout_options.find(
-      (option) => option.panel_placements.length > 0,
-    ) ??
-    null;
+  const backendLayout = useMemo(() => {
+    const options = roofGeometry?.solar_layout_options ?? [];
+    return (
+      options.find(
+        (option) => option.id === roofGeometry?.recommended_layout_option_id,
+      ) ??
+      options.find((option) => option.panel_placements.length > 0) ??
+      null
+    );
+  }, [roofGeometry]);
 
   const [mode, setMode] = useState<"edit" | "present">("edit");
+  const [canvasMode, setCanvasMode] = useState<CanvasMode>("real");
   const [hour, setHour] = useState(13);
   const [lens, setLens] = useState<"panels" | "obstructions" | "irradiance" | "measure">(
     "panels",
@@ -116,6 +120,16 @@ export function Designer({
               </div>
             )}
             {!presenting && (
+              <CanvasModeToggle
+                mode={canvasMode}
+                onChange={setCanvasMode}
+                disabled={
+                  !roofGeometry ||
+                  (roofGeometry.roof_planes?.length ?? 0) === 0
+                }
+              />
+            )}
+            {!presenting && (
               <button
                 type="button"
                 onClick={() => setTuning((t) => !t)}
@@ -148,6 +162,8 @@ export function Designer({
               placementOverride={placementOverride}
               backendPlacements={backendLayout?.panel_placements ?? []}
               backendModule={backendLayout?.module ?? null}
+              canvasMode={canvasMode}
+              roofGeometry={roofGeometry}
             />
           </div>
 

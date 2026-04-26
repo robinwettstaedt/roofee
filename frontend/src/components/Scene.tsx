@@ -18,9 +18,12 @@ import {
 } from "@react-three/postprocessing";
 import { House } from "./House";
 import { RoofPlacedPanels, type PlacementOverride } from "./RoofPlacedPanels";
+import { SyntheticHouse } from "./SyntheticHouse";
+import type { CanvasMode } from "./CanvasModeToggle";
 import { DEFAULT_PANEL, type PanelDimensions } from "@/lib/catalog";
 import type {
   PanelPlacement as BackendPanelPlacement,
+  RoofGeometryAnalysisResponse,
   SolarModulePreset,
 } from "@/types/roof";
 
@@ -40,6 +43,8 @@ export function Scene({
   placementOverride,
   backendPlacements,
   backendModule,
+  canvasMode = "real",
+  roofGeometry = null,
 }: {
   panelCount: number;
   panel?: PanelDimensions;
@@ -47,8 +52,12 @@ export function Scene({
   placementOverride?: PlacementOverride;
   backendPlacements?: BackendPanelPlacement[];
   backendModule?: SolarModulePreset | null;
+  canvasMode?: CanvasMode;
+  roofGeometry?: RoofGeometryAnalysisResponse | null;
 }) {
   const [houseRoot, setHouseRoot] = useState<THREE.Object3D | null>(null);
+  const showSynthetic = canvasMode === "synthetic" && roofGeometry !== null;
+  const bg = showSynthetic ? "#f3eee0" : "#e8f0f7";
 
   return (
     <Canvas
@@ -57,10 +66,14 @@ export function Scene({
       camera={{ position: [22, 16, 22], fov: 35 }}
       gl={{ antialias: true }}
     >
-      <color attach="background" args={["#e8f0f7"]} />
+      <color attach="background" args={[bg]} />
       <Suspense fallback={<Loader />}>
-        <House url={modelUrl} onReady={setHouseRoot} />
-        {houseRoot && (
+        {showSynthetic ? (
+          <SyntheticHouse geometry={roofGeometry!} onReady={setHouseRoot} />
+        ) : (
+          <House url={modelUrl} onReady={setHouseRoot} />
+        )}
+        {houseRoot && !showSynthetic && (
           <RoofPlacedPanels
             houseRoot={houseRoot}
             panelCount={panelCount}
