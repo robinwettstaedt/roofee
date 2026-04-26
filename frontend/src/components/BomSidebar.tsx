@@ -1,7 +1,11 @@
 "use client";
 import { useState } from "react";
 import type { BomLine, Design } from "@/types/api";
-import type { EstimatedInput } from "@/types/recommendation";
+import type {
+  EstimatedInput,
+  MonthlySolarWeather,
+} from "@/types/recommendation";
+import type { SolarLayoutOption } from "@/types/roof";
 import { eur, kwh, co2, num } from "@/lib/format";
 import { useCountUp } from "@/lib/useCountUp";
 import { Eyebrow } from "./primitives/Eyebrow";
@@ -33,6 +37,9 @@ export function BomSidebar({
   variantLabel,
   notesCount,
   realAnnualGenerationKwh,
+  monthlySolar,
+  layoutOption,
+  electricityPriceEurPerKwh = 0.32,
   estimatedInputs = [],
   warnings = [],
   onSendCustomer,
@@ -44,6 +51,9 @@ export function BomSidebar({
   variantLabel: string;
   notesCount: number;
   realAnnualGenerationKwh?: number | null;
+  monthlySolar?: MonthlySolarWeather[] | null;
+  layoutOption?: SolarLayoutOption | null;
+  electricityPriceEurPerKwh?: number;
   estimatedInputs?: EstimatedInput[];
   warnings?: string[];
   onSendCustomer?: () => void;
@@ -63,9 +73,12 @@ export function BomSidebar({
         <Metrics
           design={design}
           realAnnualGenerationKwh={realAnnualGenerationKwh}
+          monthlySolar={monthlySolar}
+          layoutOption={layoutOption}
+          electricityPriceEurPerKwh={electricityPriceEurPerKwh}
         />
         <Rule soft />
-        <SystemStrip design={design} />
+        <SystemStrip design={design} layoutOption={layoutOption} />
         <Rule soft />
         <BomTable bom={design.bom} />
         <Rule soft />
@@ -93,6 +106,20 @@ function MockedChip() {
       title="Synthesized client-side until the backend ships sizing/BOM."
     >
       Mock
+    </span>
+  );
+}
+
+/** Mark figures derived from real backend numbers but using placeholder
+ *  catalog list-prices, so the seller knows the math is real but pricing
+ *  isn't yet wired to live wholesale costs. */
+function CatalogChip() {
+  return (
+    <span
+      className="ml-1.5 inline-flex items-center rounded-sm border border-ink/15 px-1 text-[9px] font-medium uppercase tracking-[0.18em] text-dust"
+      title="Computed from real backend BOM × catalog list-prices."
+    >
+      List
     </span>
   );
 }
@@ -171,17 +198,44 @@ function Header({
 function Metrics({
   design,
   realAnnualGenerationKwh,
+  monthlySolar,
+  layoutOption,
+  electricityPriceEurPerKwh = 0.32,
 }: {
   design: Design;
   realAnnualGenerationKwh?: number | null;
+  monthlySolar?: MonthlySolarWeather[] | null;
+  layoutOption?: SolarLayoutOption | null;
+  electricityPriceEurPerKwh?: number;
 }) {
   const generationTarget =
     realAnnualGenerationKwh ?? design.metrics.annualGenerationKwh;
-  const cost = useCountUp(design.metrics.systemCostEur);
+  // Recompute payback + CO2 from the live generation target so they track the
+  // active variant + the real backend annual production figure (not the synth
+  // mock baked into `design.metrics`). System cost still comes from the synth
+  // BOM line items (real catalog list-prices, no backend cost service yet).
+  const yearlyValueEur = Math.max(
+    generationTarget * electricityPriceEurPerKwh,
+    1,
+  );
+  const liveCost = design.metrics.systemCostEur;
+  const livePaybackYears =
+    Math.round((liveCost / yearlyValueEur) * 10) / 10;
+  const liveCo2KgPerYear = Math.round(generationTarget * 0.42);
+
+  const cost = useCountUp(liveCost);
   const gen = useCountUp(generationTarget);
-  const payback = useCountUp(design.metrics.paybackYears);
-  const co2yr = useCountUp(design.metrics.co2SavedKgPerYear);
+  const payback = useCountUp(livePaybackYears);
+  const co2yr = useCountUp(liveCo2KgPerYear);
+
   const generationIsReal = realAnnualGenerationKwh != null;
+  // Backend gives a real demand-coverage ratio (annual production /
+  // annual demand). Capped at 100% for display since coverage above 1
+  // means surplus generation, not "more than fully covered".
+  const coveragePct =
+    layoutOption?.demand_coverage_ratio != null
+      ? Math.round(Math.min(1, layoutOption.demand_coverage_ratio) * 100)
+      : null;
 
   return (
     <div className="grid grid-cols-2 gap-px bg-ink/10">
@@ -195,48 +249,45 @@ function Metrics({
         value={kwh(gen)}
         accent
         sub={
-          <SparkLine annualKwh={generationTarget} />
+          <SparkLine annualKwh={generationTarget} monthly={monthlySolar} />
         }
       />
       <Metric
         eyebrow={
           <>
             System cost
-            <MockedChip />
+            <CatalogChip />
           </>
         }
         value={eur(Math.round(cost))}
         sub={
           <span className="font-mono text-[10px] uppercase tracking-[0.2em] text-dust">
-            incl. install
+            incl. install · catalog list price
           </span>
         }
       />
       <Metric
-        eyebrow={
-          <>
-            Payback
-            <MockedChip />
-          </>
-        }
+        eyebrow={<>Payback</>}
         value={
           <>
             <span className="num">{payback.toFixed(1)}</span>{" "}
             <span className="text-[14px] font-normal text-dust">years</span>
           </>
         }
+        sub={
+          <span className="font-mono text-[10px] uppercase tracking-[0.2em] text-dust">
+            @ {electricityPriceEurPerKwh.toFixed(2)} €/kWh
+          </span>
+        }
       />
       <Metric
-        eyebrow={
-          <>
-            CO₂ saved / yr
-            <MockedChip />
-          </>
-        }
+        eyebrow={<>CO₂ saved / yr</>}
         value={co2(co2yr)}
         sub={
           <span className="font-mono text-[10px] uppercase tracking-[0.2em] text-dust">
-            self-cons. {design.metrics.selfConsumptionPct}%
+            {coveragePct != null
+              ? `${coveragePct}% demand covered`
+              : `self-cons. ${design.metrics.selfConsumptionPct}%`}
           </span>
         }
       />
@@ -270,11 +321,24 @@ function Metric({
   );
 }
 
-function SystemStrip({ design }: { design: Design }) {
+function SystemStrip({
+  design,
+  layoutOption,
+}: {
+  design: Design;
+  layoutOption?: SolarLayoutOption | null;
+}) {
+  // Prefer the real backend module spec when available — gives us the actual
+  // brand, model name, and watt-peak for this layout instead of a hardcoded
+  // string. Falls back to the synth `463W modules` line during the loading
+  // window before geometry resolves.
+  const modulePvLine = layoutOption?.module
+    ? `${design.pv.panelCount} × ${Math.round(layoutOption.module.watt_peak)}W ${layoutOption.module.brand} ${layoutOption.module.model}`
+    : `${design.pv.panelCount} × 463W modules`;
   const items: { label: string; value: string; reasoning?: string }[] = [
     {
       label: "PV",
-      value: `${design.pv.panelCount} × 463W modules`,
+      value: modulePvLine,
       reasoning: design.reasoning.pv,
     },
     {

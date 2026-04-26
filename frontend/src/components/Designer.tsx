@@ -2,10 +2,19 @@
 import { useMemo, useState } from "react";
 import type { Design, DesignResponse } from "@/types/api";
 import type { PanelDimensions } from "@/lib/catalog";
-import { buildVariants, variantFor, type VariantId } from "@/lib/variants";
+import {
+  buildVariants,
+  buildVariantsFromLayoutOptions,
+  defaultVariantId,
+  variantFor,
+  type VariantId,
+} from "@/lib/variants";
 import { eur } from "@/lib/format";
 import { annualGenerationFromPvgis } from "@/lib/realGeneration";
-import type { RecommendationValidationResponse } from "@/types/recommendation";
+import type {
+  MonthlySolarWeather,
+  RecommendationValidationResponse,
+} from "@/types/recommendation";
 import type {
   RoofGeometryAnalysisResponse,
   RoofObstruction,
@@ -52,17 +61,44 @@ export function Designer({
   roofGeometry: RoofGeometryAnalysisResponse | null;
   onBack: () => void;
 }) {
-  const variants = useMemo(() => buildVariants(baseDesign), [baseDesign]);
-  const [variantId, setVariantId] = useState<VariantId>("standard");
+  const electricityPrice =
+    recommendation?.input.electricity_price_per_kwh ?? 0.32;
+  const variants = useMemo(() => {
+    const layoutOptions = roofGeometry?.solar_layout_options ?? [];
+    if (layoutOptions.length > 0) {
+      return buildVariantsFromLayoutOptions(
+        baseDesign,
+        layoutOptions,
+        electricityPrice,
+      );
+    }
+    return buildVariants(baseDesign);
+  }, [baseDesign, electricityPrice, roofGeometry]);
+  const recommendedId = roofGeometry?.recommended_layout_option_id ?? null;
+  // Track only the user's explicit pick; otherwise we derive the active tab
+  // from the backend recommendation so the active id stays in sync with the
+  // variants list as geometry resolves (no setState-in-effect cascade).
+  const [userSelectedId, setUserSelectedId] = useState<VariantId | null>(null);
+  const variantId: VariantId =
+    (userSelectedId && variants.some((v) => v.id === userSelectedId)
+      ? userSelectedId
+      : null) ?? defaultVariantId(variants, recommendedId);
   const variant = variantFor(variants, variantId);
   const design = variant.design;
 
-  // Real PVGIS-derived annual generation for the active variant; null until
-  // /api/recommendations completes, in which case we keep showing the mock.
-  const realAnnualGenerationKwh = annualGenerationFromPvgis(
+  // Annual generation precedence:
+  //  1. Backend's `solar_layout_options[active].estimated_annual_production_kwh`
+  //     — segment-aware, accounts for roof tilt/azimuth + sunshine quantiles.
+  //  2. PVGIS optimal-plane irradiation × kWp × 0.85 — generic but always-on
+  //     once `/api/recommendations` resolves.
+  //  3. Synthesized mock from the design scaffold — only the loading state.
+  const layoutAnnualKwh =
+    variant.layoutOption?.estimated_annual_production_kwh ?? null;
+  const pvgisAnnualKwh = annualGenerationFromPvgis(
     design.pv.kwp,
     recommendation?.solar_weather,
   );
+  const realAnnualGenerationKwh = layoutAnnualKwh ?? pvgisAnnualKwh;
 
   const realLatLng = recommendation?.house_data?.location ?? null;
   const realAddress = recommendation?.input.address ?? null;
@@ -114,7 +150,7 @@ export function Designer({
                 <VariantTabs
                   variants={variants}
                   activeId={variantId}
-                  onSelect={setVariantId}
+                  onSelect={setUserSelectedId}
                 />
               </div>
             )}
@@ -205,6 +241,7 @@ export function Designer({
               annualKwh={annualKwhForUi}
               monthlySavingsEur={monthlySavings}
               kwp={design.pv.kwp}
+              monthlySolar={recommendation?.solar_weather?.monthly ?? null}
             />
           )}
         </section>
@@ -217,6 +254,9 @@ export function Designer({
               variantLabel={variant.label}
               notesCount={notes.length}
               realAnnualGenerationKwh={realAnnualGenerationKwh}
+              monthlySolar={recommendation?.solar_weather?.monthly ?? null}
+              layoutOption={variant.layoutOption ?? null}
+              electricityPriceEurPerKwh={electricityPrice}
               estimatedInputs={recommendation?.estimated_inputs ?? []}
               warnings={recommendation?.warnings ?? []}
               onSendCustomer={() => alert("Sending offer to customer (stub)")}
@@ -237,10 +277,12 @@ function PresentingOverlay({
   annualKwh,
   monthlySavingsEur,
   kwp,
+  monthlySolar,
 }: {
   annualKwh: number;
   monthlySavingsEur: number;
   kwp: number;
+  monthlySolar: MonthlySolarWeather[] | null;
 }) {
   return (
     <div className="pointer-events-none absolute inset-0 flex flex-col justify-end p-12">
@@ -255,7 +297,12 @@ function PresentingOverlay({
             <p className="mt-1 text-[28px] font-medium num text-ink">
               {Math.round(annualKwh).toLocaleString("de-DE")} kWh
             </p>
-            <SparkLine annualKwh={annualKwh} width={220} height={36} />
+            <SparkLine
+              annualKwh={annualKwh}
+              monthly={monthlySolar}
+              width={220}
+              height={36}
+            />
           </div>
           <div>
             <Eyebrow>Estimated monthly savings</Eyebrow>
