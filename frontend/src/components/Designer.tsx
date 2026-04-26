@@ -6,7 +6,11 @@ import { buildVariants, variantFor, type VariantId } from "@/lib/variants";
 import { eur } from "@/lib/format";
 import { annualGenerationFromPvgis } from "@/lib/realGeneration";
 import type { RecommendationValidationResponse } from "@/types/recommendation";
-import type { RoofObstruction, SelectedRoof } from "@/types/roof";
+import type {
+  RoofGeometryAnalysisResponse,
+  RoofObstruction,
+  SelectedRoof,
+} from "@/types/roof";
 import { BomSidebar } from "./BomSidebar";
 import { CanvasOverlays, type Note } from "./CanvasOverlays";
 import { PlacementControls } from "./PlacementControls";
@@ -29,6 +33,7 @@ export function Designer({
   recommendation,
   selectedRoof,
   obstructions,
+  roofGeometry,
   onBack,
 }: {
   response: DesignResponse;
@@ -41,6 +46,7 @@ export function Designer({
   recommendation: RecommendationValidationResponse | null;
   selectedRoof: SelectedRoof | null;
   obstructions: RoofObstruction[];
+  roofGeometry: RoofGeometryAnalysisResponse | null;
   onBack: () => void;
 }) {
   const variants = useMemo(() => buildVariants(baseDesign), [baseDesign]);
@@ -62,6 +68,14 @@ export function Designer({
       (sum, seg) => sum + (seg.area_meters2 ?? 0),
       0,
     ) ?? null;
+  const backendLayout =
+    roofGeometry?.solar_layout_options.find(
+      (option) => option.id === roofGeometry.recommended_layout_option_id,
+    ) ??
+    roofGeometry?.solar_layout_options.find(
+      (option) => option.panel_placements.length > 0,
+    ) ??
+    null;
 
   const [mode, setMode] = useState<"edit" | "present">("edit");
   const [hour, setHour] = useState(13);
@@ -132,6 +146,8 @@ export function Designer({
               panel={panelDims}
               modelUrl={modelUrl}
               placementOverride={placementOverride}
+              backendPlacements={backendLayout?.panel_placements ?? []}
+              backendModule={backendLayout?.module ?? null}
             />
           </div>
 
@@ -154,7 +170,9 @@ export function Designer({
               lat={realLatLng?.latitude ?? response.location.latLng.lat}
               lng={realLatLng?.longitude ?? response.location.latLng.lng}
               selectedRoofAreaPixels={selectedRoof?.area_pixels ?? null}
-              obstructionCount={obstructions.length}
+              obstructionCount={
+                roofGeometry?.mapped_obstructions.length ?? obstructions.length
+              }
             />
           )}
 
