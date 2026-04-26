@@ -1,6 +1,8 @@
 "use client";
 import { useCallback, useEffect, useRef, useState } from "react";
+import { ArrowRight, Box, MapPin, Upload, X } from "lucide-react";
 import type { Profile } from "@/types/api";
+import { RoofeeLogo } from "./RoofeeLogo";
 import { SecondaryInputs } from "./SecondaryInputs";
 import {
   loadGoogleMaps,
@@ -8,6 +10,15 @@ import {
   type AutocompleteSuggestion,
   type GoogleMapsNamespace,
 } from "@/lib/google-maps";
+
+// Faint blueprint dot-grid behind the intake pages. Reads as a draftsman's
+// surface, so the cream paper feels like a tool, not a marketing background.
+const DOT_GRID_BG: React.CSSProperties = {
+  backgroundImage:
+    "radial-gradient(circle, rgba(24,23,21,0.05) 1px, transparent 1px)",
+  backgroundSize: "24px 24px",
+  backgroundPosition: "-12px -12px",
+};
 
 export function AddressIntake({
   initialAddress = "Hauptstraße 1, 10827 Berlin",
@@ -190,37 +201,45 @@ export function AddressIntake({
   }
 
   return (
-    <div className="flex h-screen w-screen flex-col">
-      <header className="flex h-14 items-center px-6">
-        <span className="text-[15px] font-semibold tracking-tight text-ink">
-          Roofee
-        </span>
+    <div className="flex h-screen w-screen flex-col" style={DOT_GRID_BG}>
+      <header className="flex flex-col items-center gap-2 px-6 pt-6 pb-3">
+        <RoofeeLogo size="large" />
+        {step === 2 && (
+          <FlowStepper current="details" onJumpToAddress={() => setStep(1)} />
+        )}
       </header>
 
       {step === 1 ? (
-        <main className="flex flex-1 items-center justify-center px-6">
-          <div className="w-full max-w-[640px] -mt-12">
+        <main className="relative flex flex-1 overflow-hidden">
+          <HeroVisual />
+          <div className="relative z-10 mx-auto flex w-full max-w-[1180px] items-center px-6 py-8">
+            <div className="w-full max-w-[520px]">
             <h1
-              className="rise text-center text-[34px] md:text-[40px] font-medium leading-[1.15] tracking-tight text-ink"
+              className="rise text-[34px] md:text-[40px] font-medium leading-[1.1] tracking-tight text-ink lg:text-[44px]"
               style={{ animationDelay: "20ms" }}
             >
               Let&rsquo;s design your solar system.
             </h1>
             <p
-              className="rise mt-4 text-center text-[15px] text-dust"
+              className="rise mt-4 max-w-[440px] text-[15px] text-dust"
               style={{ animationDelay: "100ms" }}
             >
               Start with the home&rsquo;s address.
             </p>
 
             <div
-              className="rise mt-12 relative z-30"
+              className="rise mt-8 relative z-30"
               style={{ animationDelay: "180ms" }}
             >
               <div ref={wrapRef} className="relative">
+                <MapPin
+                  className="pointer-events-none absolute left-5 top-1/2 -translate-y-1/2 h-5 w-5 text-dust"
+                  strokeWidth={1.5}
+                  aria-hidden
+                />
                 <input
                   ref={inputRef}
-                  className="input-hero text-[26px] md:text-[30px]"
+                  className="input-hero text-[24px] md:text-[28px] !pl-14 !pr-16 !text-left"
                   value={address}
                   onChange={(e) => onAddressInputChange(e.target.value)}
                   onFocus={() => {
@@ -231,6 +250,15 @@ export function AddressIntake({
                   spellCheck={false}
                   autoComplete="off"
                 />
+                <button
+                  type="button"
+                  onClick={continueToStep2}
+                  disabled={!ready || disabled}
+                  aria-label="Continue"
+                  className="absolute right-3 top-1/2 -translate-y-1/2 grid h-10 w-10 place-items-center rounded-full bg-ink text-paper transition hover:bg-signal disabled:cursor-not-allowed disabled:bg-ink/20"
+                >
+                  <ArrowRight className="h-4 w-4" strokeWidth={2} aria-hidden />
+                </button>
                 {showDropdown && suggestions.length > 0 && (
                   <ul
                     role="listbox"
@@ -269,67 +297,72 @@ export function AddressIntake({
               </div>
             </div>
 
-            <div
-              className="rise mt-10 flex justify-center"
+            <p
+              className="rise mt-4 text-[12px] text-dust"
               style={{ animationDelay: "260ms" }}
             >
-              <button
-                type="button"
-                disabled={!ready || disabled}
-                onClick={continueToStep2}
-                className="inline-flex items-center gap-2 rounded-full bg-ink px-8 py-3.5 text-[14px] font-medium text-paper transition hover:bg-signal disabled:cursor-not-allowed disabled:bg-ink/25"
-              >
-                Continue
-                <span aria-hidden>→</span>
-              </button>
-            </div>
+              Next: a few quick questions about the home — under a minute.
+            </p>
 
             <div
-              className="rise mt-10 text-center"
+              className="rise mt-8"
               style={{ animationDelay: "340ms" }}
             >
-              <label className="cursor-pointer text-[13px] text-dust underline-offset-4 hover:text-ink hover:underline">
-                <input
-                  type="file"
-                  accept=".glb,.gltf,model/gltf-binary,model/gltf+json"
-                  className="hidden"
-                  onChange={(e) =>
-                    setFileName(e.target.files?.[0]?.name ?? null)
-                  }
-                />
-                {fileName ? `Selected: ${fileName}` : "or upload your own 3D model"}
-              </label>
+              {fileName ? (
+                <div className="inline-flex items-center gap-2 rounded-full border border-ink/15 bg-paper/70 px-3.5 py-1.5 text-[12px]">
+                  <Box
+                    className="h-3.5 w-3.5 text-ink-soft"
+                    strokeWidth={1.5}
+                    aria-hidden
+                  />
+                  <span className="num text-ink">{fileName}</span>
+                  <button
+                    type="button"
+                    onClick={() => setFileName(null)}
+                    className="ml-0.5 grid h-4 w-4 place-items-center rounded-full text-dust transition hover:bg-ink/10 hover:text-ink"
+                    aria-label="Remove file"
+                  >
+                    <X className="h-3 w-3" strokeWidth={1.75} aria-hidden />
+                  </button>
+                </div>
+              ) : (
+                <label className="inline-flex cursor-pointer items-center gap-1.5 text-[12px] text-dust transition hover:text-ink">
+                  <Upload
+                    className="h-3.5 w-3.5"
+                    strokeWidth={1.5}
+                    aria-hidden
+                  />
+                  <span className="underline-offset-4 hover:underline">
+                    Or upload a 3D model
+                  </span>
+                  <input
+                    type="file"
+                    accept=".glb,.gltf,model/gltf-binary,model/gltf+json"
+                    className="hidden"
+                    onChange={(e) =>
+                      setFileName(e.target.files?.[0]?.name ?? null)
+                    }
+                  />
+                </label>
+              )}
+            </div>
             </div>
           </div>
         </main>
       ) : (
         <main className="flex flex-1 items-start justify-center px-6 py-8">
           <div className="w-full max-w-[640px]">
-            <button
-              type="button"
-              onClick={() => setStep(1)}
-              className="rise text-[13px] text-dust transition hover:text-ink"
-              style={{ animationDelay: "20ms" }}
-            >
-              ← {address}
-            </button>
-
-            <h1
-              className="rise mt-6 text-[28px] font-medium leading-tight tracking-tight text-ink"
-              style={{ animationDelay: "60ms" }}
-            >
-              A few details about the home.
-            </h1>
             <p
-              className="rise mt-2 text-[14px] text-dust"
-              style={{ animationDelay: "120ms" }}
+              className="rise truncate text-[12px] text-dust"
+              style={{ animationDelay: "40ms" }}
+              title={address}
             >
-              We use these to size the system. You can change everything later.
+              {address}
             </p>
 
             <div
-              className="rise mt-10"
-              style={{ animationDelay: "180ms" }}
+              className="rise mt-8"
+              style={{ animationDelay: "120ms" }}
             >
               <SecondaryInputs
                 monthlyBillEur={monthlyBillEur}
@@ -350,30 +383,221 @@ export function AddressIntake({
                 onHasStorage={setHasStorage}
                 hasWallbox={hasWallbox}
                 onHasWallbox={setHasWallbox}
+                loading={!!disabled}
+                onComplete={submit}
+                onBackToAddress={() => setStep(1)}
               />
-            </div>
-
-            <div className="mt-10 flex items-center justify-end gap-4">
-              <button
-                type="button"
-                onClick={() => setStep(1)}
-                className="text-[13px] text-dust transition hover:text-ink"
-              >
-                Back
-              </button>
-              <button
-                type="button"
-                disabled={!ready || disabled}
-                onClick={submit}
-                className="inline-flex items-center gap-2 rounded-full bg-signal px-8 py-3.5 text-[14px] font-medium text-paper transition hover:bg-ink disabled:cursor-not-allowed disabled:bg-ink/25"
-              >
-                Design my system
-                <span aria-hidden>→</span>
-              </button>
             </div>
           </div>
         </main>
       )}
     </div>
+  );
+}
+
+/**
+ * Hero visual for the address page. Anchored to the right edge of the main
+ * content area, full height, with a left-side gradient mask so it bleeds
+ * into the cream paper instead of presenting a hard edge. Hidden below lg.
+ *
+ * Drop a generated image at /frontend/public/intake-hero.png (or .jpg —
+ * adjust the src below). Until the file exists, an inline SVG placeholder
+ * keeps the layout intentional.
+ */
+function HeroVisual() {
+  const [imgFailed, setImgFailed] = useState(false);
+  // Fade the left ~38% of the image into transparent so it dissolves into
+  // the cream background instead of sitting in a hard rectangle.
+  const fadeMask =
+    "linear-gradient(to right, transparent 0%, rgba(0,0,0,0.35) 18%, black 38%)";
+  const maskStyle: React.CSSProperties = {
+    WebkitMaskImage: fadeMask,
+    maskImage: fadeMask,
+  };
+  return (
+    <div
+      className="pointer-events-none absolute inset-y-0 right-0 hidden w-[62%] lg:block"
+      aria-hidden
+    >
+      {imgFailed ? (
+        <div className="relative h-full w-full" style={maskStyle}>
+          <HeroPlaceholder />
+        </div>
+      ) : (
+        <img
+          src="/intake-hero.png"
+          alt=""
+          className="h-full w-full object-cover object-center"
+          style={maskStyle}
+          onError={() => setImgFailed(true)}
+        />
+      )}
+    </div>
+  );
+}
+
+function HeroPlaceholder() {
+  // Stylized "satellite tile" mock — readable as the product's output without
+  // needing a real screenshot. Replaced once /intake-hero.png is present.
+  return (
+    <svg
+      viewBox="0 0 400 500"
+      preserveAspectRatio="xMidYMid slice"
+      className="absolute inset-0 h-full w-full"
+      aria-hidden
+    >
+      <defs>
+        <pattern
+          id="hero-grid"
+          width="20"
+          height="20"
+          patternUnits="userSpaceOnUse"
+        >
+          <circle cx="1" cy="1" r="1" fill="rgba(24,23,21,0.07)" />
+        </pattern>
+        <linearGradient id="hero-sky" x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0%" stopColor="#ece8de" />
+          <stop offset="100%" stopColor="#e2dccd" />
+        </linearGradient>
+      </defs>
+
+      <rect width="400" height="500" fill="url(#hero-sky)" />
+      <rect width="400" height="500" fill="url(#hero-grid)" />
+
+      {/* Roof silhouette from above */}
+      <polygon
+        points="80,170 320,170 340,260 320,360 80,360 60,260"
+        fill="rgba(24,23,21,0.06)"
+        stroke="rgba(24,23,21,0.45)"
+        strokeWidth="1.5"
+      />
+      {/* Ridge line */}
+      <line
+        x1="80"
+        y1="265"
+        x2="320"
+        y2="265"
+        stroke="rgba(24,23,21,0.30)"
+        strokeWidth="1"
+        strokeDasharray="4 4"
+      />
+
+      {/* Solar panel grid — top half */}
+      {Array.from({ length: 4 }).map((_, row) =>
+        Array.from({ length: 6 }).map((_, col) => (
+          <rect
+            key={`t-${row}-${col}`}
+            x={108 + col * 32}
+            y={186 + row * 17}
+            width="28"
+            height="14"
+            fill="rgba(24,23,21,0.78)"
+            stroke="rgba(232,90,44,0.4)"
+            strokeWidth="0.5"
+          />
+        )),
+      )}
+      {/* Solar panel grid — bottom half */}
+      {Array.from({ length: 3 }).map((_, row) =>
+        Array.from({ length: 6 }).map((_, col) => (
+          <rect
+            key={`b-${row}-${col}`}
+            x={108 + col * 32}
+            y={278 + row * 17}
+            width="28"
+            height="14"
+            fill="rgba(24,23,21,0.78)"
+            stroke="rgba(232,90,44,0.4)"
+            strokeWidth="0.5"
+          />
+        )),
+      )}
+
+      {/* North arrow */}
+      <g transform="translate(354 56)">
+        <circle r="18" fill="none" stroke="rgba(24,23,21,0.25)" strokeWidth="1" />
+        <path
+          d="M 0,-12 L 5,4 L 0,1 L -5,4 Z"
+          fill="rgba(232,90,44,1)"
+        />
+        <text
+          x="0"
+          y="14"
+          textAnchor="middle"
+          fontSize="9"
+          fontFamily="monospace"
+          fill="rgba(24,23,21,0.55)"
+          letterSpacing="0.1em"
+        >
+          N
+        </text>
+      </g>
+
+      {/* Stamp */}
+      <g transform="translate(28 462)">
+        <text
+          fontSize="9"
+          fontFamily="monospace"
+          fill="rgba(24,23,21,0.40)"
+          letterSpacing="0.18em"
+        >
+          ROOFEE · LAYOUT PREVIEW
+        </text>
+      </g>
+    </svg>
+  );
+}
+
+function FlowStepper({
+  current,
+  onJumpToAddress,
+}: {
+  current: "address" | "details" | "design";
+  onJumpToAddress?: () => void;
+}) {
+  const dot = (
+    <span className="text-ink/30" aria-hidden>
+      ·
+    </span>
+  );
+  return (
+    <nav
+      className="flex items-center gap-3 text-[11px] uppercase tracking-[0.16em]"
+      aria-label="Progress"
+    >
+      {current === "address" || !onJumpToAddress ? (
+        <span
+          className={
+            current === "address" ? "font-medium text-ink" : "text-ink/30"
+          }
+        >
+          Address
+        </span>
+      ) : (
+        <button
+          type="button"
+          onClick={onJumpToAddress}
+          className="text-dust transition hover:text-ink"
+        >
+          ← Address
+        </button>
+      )}
+      {dot}
+      <span
+        className={
+          current === "details" ? "font-medium text-ink" : "text-ink/30"
+        }
+      >
+        Details
+      </span>
+      {dot}
+      <span
+        className={
+          current === "design" ? "font-medium text-ink" : "text-ink/30"
+        }
+      >
+        Design
+      </span>
+    </nav>
   );
 }

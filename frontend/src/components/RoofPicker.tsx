@@ -1,6 +1,7 @@
 "use client";
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { RoofAnalysis, RoofOutline } from "@/types/roof";
+import { RoofeeLogo } from "./RoofeeLogo";
 
 /**
  * Lets the user click the buildings they want to design panels for. Renders
@@ -193,9 +194,7 @@ export function RoofPicker({
           >
             ← Edit address
           </button>
-          <span className="text-[15px] font-semibold tracking-tight text-ink">
-            Roofee
-          </span>
+          <RoofeeLogo />
         </div>
         <span className="hidden truncate text-[12px] text-dust md:block md:max-w-[420px]">
           {address}

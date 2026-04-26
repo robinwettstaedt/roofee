@@ -1,4 +1,5 @@
 "use client";
+import { RoofeeLogo } from "./RoofeeLogo";
 
 export function SessionBar({
   showBack,
@@ -23,9 +24,7 @@ export function SessionBar({
             ← Back
           </button>
         )}
-        <span className="text-[15px] font-semibold leading-none tracking-tight text-ink">
-          Roofee
-        </span>
+        <RoofeeLogo size="compact" />
         {breadcrumb ? (
           <span className="ml-3 flex items-center gap-2 text-[12px] text-dust">
             <span className="rule-vert h-3" />
