@@ -17,6 +17,14 @@ class Settings(BaseSettings):
     house_data_cache_dir: Path = Path(".roofee_cache/house_data")
     google_solar_radius_meters: float = 50.0
     google_solar_pixel_size_meters: float = 0.25
+    building_outline_model_path: Path = (
+        Path(__file__).resolve().parents[2]
+        / "models"
+        / "building_outline"
+        / "yolov8m-building-segmentation-best.pt"
+    )
+    building_outline_model_id: str = "keremberke/yolov8m-building-segmentation"
+    building_outline_model_file: str = "best.pt"
     rid_model_checkpoint_path: Path = (
         Path(__file__).resolve().parents[2]
         / "models"
