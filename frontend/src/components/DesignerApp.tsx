@@ -22,38 +22,15 @@ import type { RoofGeometryAnalysisResponse, SelectedRoof } from "@/types/roof";
 
 const HOUSE_GLB = "/house.glb";
 
-// Default placement on the central peaked-roof house. Tunable live via the
-// PlacementControls overlay inside the Designer (Tune toggle); persists in
-// localStorage and is copy-pastable back into this constant.
+// Mock panel placement for the hackathon demo. Keep this fixed so the rendered
+// panels do not drift because of previously tuned localStorage values.
 const DEFAULT_PLACEMENT: PlacementOverride = {
-  center: [-1, 9, 5],
-  tiltDeg: 14,
-  azimuthDeg: 80,
-  yawDeg: -10,
-  cols: 2,
+  center: [-10, 13.8, -12],
+  tiltDeg: 47,
+  azimuthDeg: 185,
+  yawDeg: 6,
+  cols: 3,
 };
-
-const STORAGE_KEY = "roofee.placement.v1";
-
-function loadStoredPlacement(): PlacementOverride {
-  if (typeof window === "undefined") return DEFAULT_PLACEMENT;
-  try {
-    const raw = window.localStorage.getItem(STORAGE_KEY);
-    if (!raw) return DEFAULT_PLACEMENT;
-    const parsed = JSON.parse(raw) as PlacementOverride;
-    if (
-      Array.isArray(parsed?.center) &&
-      parsed.center.length === 3 &&
-      typeof parsed.tiltDeg === "number" &&
-      typeof parsed.azimuthDeg === "number"
-    ) {
-      return parsed;
-    }
-  } catch {
-    // ignore
-  }
-  return DEFAULT_PLACEMENT;
-}
 
 type View = "intake" | "picking-house" | "thinking" | "designer";
 
@@ -78,13 +55,8 @@ export default function DesignerApp() {
   const [houseGlbUrl, setHouseGlbUrl] = useState<string | null>(null);
   const [catalogPanel, setCatalogPanel] = useState<CatalogComponent | null>(null);
   const [placement, setPlacement] =
-    useState<PlacementOverride>(loadStoredPlacement);
+    useState<PlacementOverride>(DEFAULT_PLACEMENT);
   const previousGlbUrl = useRef<string | null>(null);
-
-  useEffect(() => {
-    if (typeof window === "undefined") return;
-    window.localStorage.setItem(STORAGE_KEY, JSON.stringify(placement));
-  }, [placement]);
 
   useEffect(() => {
     let cancelled = false;

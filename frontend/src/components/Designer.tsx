@@ -23,6 +23,8 @@ import { VariantTabs } from "./VariantTabs";
 import { Eyebrow } from "./primitives/Eyebrow";
 import type { PlacementOverride } from "./RoofPlacedPanels";
 
+const MOCK_PANEL_COUNT = 3;
+
 export function Designer({
   response,
   baseDesign,
@@ -69,17 +71,6 @@ export function Designer({
       (sum, seg) => sum + (seg.area_meters2 ?? 0),
       0,
     ) ?? null;
-  const backendLayout = useMemo(() => {
-    const options = roofGeometry?.solar_layout_options ?? [];
-    return (
-      options.find(
-        (option) => option.id === roofGeometry?.recommended_layout_option_id,
-      ) ??
-      options.find((option) => option.panel_placements.length > 0) ??
-      null
-    );
-  }, [roofGeometry]);
-
   const [mode, setMode] = useState<"edit" | "present">("edit");
   const [canvasMode, setCanvasMode] = useState<CanvasMode>("real");
   const [hour, setHour] = useState(13);
@@ -92,6 +83,14 @@ export function Designer({
   const annualKwhForUi =
     realAnnualGenerationKwh ?? design.metrics.annualGenerationKwh;
   const monthlySavings = (annualKwhForUi * 0.32) / 12;
+  const mockPanelDims = useMemo(
+    () => ({
+      ...panelDims,
+      lengthMeters: panelDims.widthMeters,
+      widthMeters: panelDims.lengthMeters,
+    }),
+    [panelDims],
+  );
   const presenting = mode === "present";
 
   return (
@@ -156,13 +155,13 @@ export function Designer({
         <section className="relative flex-1">
           <div className="absolute inset-0 bg-gradient-to-br from-paper via-paper-deep to-paper">
             <Scene
-              panelCount={design.pv.panelCount}
-              panel={panelDims}
+              panelCount={MOCK_PANEL_COUNT}
+              panel={mockPanelDims}
               modelUrl={modelUrl}
-              placementOverride={tuning ? placementOverride : undefined}
-              backendPlacements={backendLayout?.panel_placements ?? []}
-              backendModule={backendLayout?.module ?? null}
-              allowPlacementFallback={!roofGeometry}
+              placementOverride={{ ...placementOverride, cols: MOCK_PANEL_COUNT }}
+              backendPlacements={[]}
+              backendModule={null}
+              allowPlacementFallback
               canvasMode={canvasMode}
               roofGeometry={roofGeometry}
             />
