@@ -43,6 +43,7 @@ export function Scene({
   placementOverride,
   backendPlacements,
   backendModule,
+  allowPlacementFallback = true,
   canvasMode = "real",
   roofGeometry = null,
 }: {
@@ -52,6 +53,7 @@ export function Scene({
   placementOverride?: PlacementOverride;
   backendPlacements?: BackendPanelPlacement[];
   backendModule?: SolarModulePreset | null;
+  allowPlacementFallback?: boolean;
   canvasMode?: CanvasMode;
   roofGeometry?: RoofGeometryAnalysisResponse | null;
 }) {
@@ -81,6 +83,7 @@ export function Scene({
             override={placementOverride}
             backendPlacements={backendPlacements}
             backendModule={backendModule}
+            allowFallback={allowPlacementFallback}
           />
         )}
         <Environment preset="sunset" />

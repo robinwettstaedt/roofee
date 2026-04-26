@@ -22,6 +22,53 @@ type BackendPose = Pose & {
 const UP = new THREE.Vector3(0, 1, 0);
 const SAMPLE_OFFSETS_M = 1.5;
 
+function getBackendModelRoot(houseRoot: THREE.Object3D): THREE.Object3D {
+  const modelRoot = houseRoot.userData.roofeeModelRoot;
+  return modelRoot instanceof THREE.Object3D ? modelRoot : houseRoot;
+}
+
+function transformModelPoint(
+  modelRoot: THREE.Object3D,
+  point: number[],
+): THREE.Vector3 {
+  return modelRoot.localToWorld(
+    new THREE.Vector3(point[0], point[1], point[2]),
+  );
+}
+
+function transformModelDirection(
+  modelRoot: THREE.Object3D,
+  direction: number[],
+): THREE.Vector3 {
+  return new THREE.Vector3(direction[0], direction[1], direction[2])
+    .transformDirection(modelRoot.matrixWorld)
+    .normalize();
+}
+
+function transformModelNormal(
+  modelRoot: THREE.Object3D,
+  normal: number[],
+): THREE.Vector3 {
+  const normalMatrix = new THREE.Matrix3().getNormalMatrix(modelRoot.matrixWorld);
+  return new THREE.Vector3(normal[0], normal[1], normal[2])
+    .applyMatrix3(normalMatrix)
+    .normalize();
+}
+
+function orthogonalizeDirection(
+  direction: THREE.Vector3,
+  normal: THREE.Vector3,
+): THREE.Vector3 {
+  const axis = direction.clone().addScaledVector(normal, -direction.dot(normal));
+  if (axis.lengthSq() > 1e-8) return axis.normalize();
+
+  const fallback =
+    Math.abs(normal.dot(new THREE.Vector3(1, 0, 0))) < 0.9
+      ? new THREE.Vector3(1, 0, 0)
+      : new THREE.Vector3(0, 0, 1);
+  return fallback.addScaledVector(normal, -fallback.dot(normal)).normalize();
+}
+
 function castDown(
   houseRoot: THREE.Object3D,
   x: number,
@@ -34,6 +81,16 @@ function castDown(
   );
   const hits = ray.intersectObject(houseRoot, true);
   return hits[0] ?? null;
+}
+
+function normalFromHit(hit: THREE.Intersection): THREE.Vector3 | null {
+  if (!hit.face) return null;
+  const normalMatrix = new THREE.Matrix3().getNormalMatrix(
+    hit.object.matrixWorld,
+  );
+  const normal = hit.face.normal.clone().applyMatrix3(normalMatrix).normalize();
+  if (normal.y < 0) normal.negate();
+  return normal;
 }
 
 function findRoof(houseRoot: THREE.Object3D): THREE.Intersection | null {
@@ -128,6 +185,7 @@ export function RoofPlacedPanels({
   override,
   backendPlacements = [],
   backendModule,
+  allowFallback = true,
 }: {
   houseRoot: THREE.Object3D;
   panelCount: number;
@@ -135,11 +193,13 @@ export function RoofPlacedPanels({
   override?: PlacementOverride;
   backendPlacements?: BackendPanelPlacement[];
   backendModule?: SolarModulePreset | null;
+  allowFallback?: boolean;
 }) {
   const backendPoses = useMemo<BackendPose[]>(() => {
     if (!backendModule || backendPlacements.length === 0) return [];
     houseRoot.updateMatrixWorld(true);
-    const originWorld = houseRoot.localToWorld(new THREE.Vector3(0, 0, 0));
+    const modelRoot = getBackendModelRoot(houseRoot);
+    modelRoot.updateMatrixWorld(true);
 
     return backendPlacements
       .map((placement) => {
@@ -150,33 +210,23 @@ export function RoofPlacedPanels({
         ) {
           return null;
         }
-        const center = houseRoot.localToWorld(
-          new THREE.Vector3(
-            placement.center_model[0],
-            placement.center_model[1],
-            placement.center_model[2],
-          ),
+        let center = transformModelPoint(modelRoot, placement.center_model);
+        let normal = transformModelNormal(modelRoot, placement.normal_model);
+        if (normal.y < 0) normal.negate();
+        const thicknessMeters = placement.thickness_m ?? backendModule.thickness_m;
+        // Keep backend x/z layout, but trust the displayed mesh for roof height.
+        const roofHit = castDown(houseRoot, center.x, center.z);
+        const roofNormal = roofHit ? normalFromHit(roofHit) : null;
+        if (roofHit && roofNormal) {
+          const lift = (placement.clearance_m ?? 0.035) + thicknessMeters / 2;
+          center = roofHit.point.clone().addScaledVector(roofNormal, lift);
+          normal = roofNormal;
+        }
+        const rawLengthAxis = transformModelDirection(
+          modelRoot,
+          placement.length_axis_model,
         );
-        const normal = houseRoot
-          .localToWorld(
-            new THREE.Vector3(
-              placement.normal_model[0],
-              placement.normal_model[1],
-              placement.normal_model[2],
-            ),
-          )
-          .sub(originWorld)
-          .normalize();
-        const lengthAxis = houseRoot
-          .localToWorld(
-            new THREE.Vector3(
-              placement.length_axis_model[0],
-              placement.length_axis_model[1],
-              placement.length_axis_model[2],
-            ),
-          )
-          .sub(originWorld)
-          .normalize();
+        const lengthAxis = orthogonalizeDirection(rawLengthAxis, normal);
         const widthAxis = lengthAxis.clone().cross(normal).normalize();
         const basis = new THREE.Matrix4().makeBasis(lengthAxis, normal, widthAxis);
         const rotation = new THREE.Euler().setFromQuaternion(
@@ -188,7 +238,7 @@ export function RoofPlacedPanels({
           rot: [rotation.x, rotation.y, rotation.z] as [number, number, number],
           lengthMeters: backendModule.length_m,
           widthMeters: backendModule.width_m,
-          thicknessMeters: placement.thickness_m || backendModule.thickness_m,
+          thicknessMeters,
         };
       })
       .filter((pose): pose is BackendPose => pose !== null);
@@ -214,35 +264,39 @@ export function RoofPlacedPanels({
       );
     }
 
+    if (!allowFallback) return [];
+
     const hit = findRoof(houseRoot);
     if (!hit || !hit.face) {
       console.warn("[RoofPlacedPanels] no roof hit at scene center");
       return [];
     }
-    const normalMatrix = new THREE.Matrix3().getNormalMatrix(
-      hit.object.matrixWorld,
-    );
-    const normalWorld = hit.face.normal
-      .clone()
-      .applyMatrix3(normalMatrix)
-      .normalize();
-    if (normalWorld.y < 0) normalWorld.negate();
+    const normalWorld = normalFromHit(hit);
+    if (!normalWorld) return [];
     console.info(
       `[RoofPlacedPanels] hit at (${hit.point.x.toFixed(2)}, ${hit.point.y.toFixed(2)}, ${hit.point.z.toFixed(2)}) normal=(${normalWorld.x.toFixed(2)}, ${normalWorld.y.toFixed(2)}, ${normalWorld.z.toFixed(2)})`,
     );
     return buildGrid(panelCount, hit.point, normalWorld, panel);
-  }, [backendPoses.length, houseRoot, panelCount, panel, override]);
+  }, [allowFallback, backendPoses.length, houseRoot, panelCount, panel, override]);
 
   useEffect(() => {
     if (typeof window === "undefined") return;
     (window as unknown as { __roofeePanels?: unknown }).__roofeePanels = {
       panelCount,
+      source:
+        backendPoses.length > 0
+          ? "backend"
+          : override
+            ? "tuned-override"
+            : allowFallback
+              ? "roof-raycast-fallback"
+              : "no-backend-placement",
       backendPoseCount: backendPoses.length,
       poseCount: poses.length,
       override,
       firstPose: backendPoses[0] ?? poses[0] ?? null,
     };
-  }, [backendPoses, override, panelCount, poses]);
+  }, [allowFallback, backendPoses, override, panelCount, poses]);
 
   if (backendPoses.length > 0) {
     return (

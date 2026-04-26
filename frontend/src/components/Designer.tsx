@@ -159,9 +159,10 @@ export function Designer({
               panelCount={design.pv.panelCount}
               panel={panelDims}
               modelUrl={modelUrl}
-              placementOverride={placementOverride}
+              placementOverride={tuning ? placementOverride : undefined}
               backendPlacements={backendLayout?.panel_placements ?? []}
               backendModule={backendLayout?.module ?? null}
+              allowPlacementFallback={!roofGeometry}
               canvasMode={canvasMode}
               roofGeometry={roofGeometry}
             />
