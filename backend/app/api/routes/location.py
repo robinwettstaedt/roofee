@@ -6,7 +6,14 @@ from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import Response
 
 from app.core.config import settings
-from app.models.location import GeocodingMetadata, HouseModelMetadata, HouseModelRequest, TileSelection
+from app.models.location import (
+    GeocodingMetadata,
+    HouseModelMetadata,
+    HouseModelRequest,
+    TileGlbMetadata,
+    TileGlbRequest,
+    TileSelection,
+)
 from app.services.location.geocoding_service import GeocodingService, get_geocoding_service
 from app.services.location.google_3d_tiles_service import Google3DTilesService, get_google_3d_tiles_service
 
@@ -52,6 +59,37 @@ def get_house_model(
         candidate_tile_count=candidate_count,
         copyright=copyright_text,
         glb_size_bytes=len(glb_bytes),
+    )
+    return Response(
+        content=glb_bytes,
+        media_type="model/gltf-binary",
+        headers={"Roofee-Metadata": json.dumps(metadata.model_dump(mode="json"), ensure_ascii=True)},
+    )
+
+
+@router.post(
+    "/location/tile-glb",
+    responses={
+        200: {
+            "content": {"model/gltf-binary": {}},
+            "description": (
+                "Binary GLB for the leaf tile the user picked in the browser. "
+                "Structured metadata is JSON-encoded in the Roofee-Metadata response header."
+            ),
+        }
+    },
+)
+def get_tile_glb(
+    request: TileGlbRequest,
+    tiles_service: Google3DTilesService = Depends(get_google_3d_tiles_service),
+) -> Response:
+    _require_google_api_key()
+    glb_bytes = tiles_service.fetch_tile_glb(request.tile_uri, request.session)
+    metadata = TileGlbMetadata(
+        tile_uri=request.tile_uri,
+        glb_size_bytes=len(glb_bytes),
+        anchor_latitude=request.latitude,
+        anchor_longitude=request.longitude,
     )
     return Response(
         content=glb_bytes,

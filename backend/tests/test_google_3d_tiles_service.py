@@ -169,6 +169,73 @@ def test_fetch_house_glb_rejects_radius_above_max() -> None:
     assert exc.value.detail == "radius_m must be 200 or smaller."
 
 
+def test_fetch_tile_glb_normalizes_key_and_appends_session(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured_url: list[str] = []
+
+    def fake_get(url: str, **kwargs: object) -> httpx.Response:
+        captured_url.append(url)
+        return httpx.Response(200, request=httpx.Request("GET", url), content=GLB_BYTES)
+
+    monkeypatch.setattr(google_3d_tiles_service.httpx, "get", fake_get)
+
+    body = service().fetch_tile_glb(
+        "https://tile.googleapis.com/v1/3dtiles/leaf.glb?key=browser-key",
+        session="session-abc",
+    )
+
+    assert body == GLB_BYTES
+    # Browser key was stripped, server key was set, session was appended.
+    assert "key=test-key" in captured_url[0]
+    assert "key=browser-key" not in captured_url[0]
+    assert "session=session-abc" in captured_url[0]
+
+
+def test_fetch_tile_glb_preserves_existing_session(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured_url: list[str] = []
+
+    def fake_get(url: str, **kwargs: object) -> httpx.Response:
+        captured_url.append(url)
+        return httpx.Response(200, request=httpx.Request("GET", url), content=GLB_BYTES)
+
+    monkeypatch.setattr(google_3d_tiles_service.httpx, "get", fake_get)
+
+    service().fetch_tile_glb(
+        "https://tile.googleapis.com/v1/3dtiles/leaf.glb?session=already-set",
+        session="ignored-because-uri-already-has-one",
+    )
+
+    assert "session=already-set" in captured_url[0]
+    assert "ignored-because-uri-already-has-one" not in captured_url[0]
+
+
+def test_fetch_tile_glb_rejects_unauthorized_host() -> None:
+    with pytest.raises(HTTPException) as exc:
+        service().fetch_tile_glb("https://evil.example.com/3dtiles/leaf.glb")
+
+    assert exc.value.status_code == 422
+    assert "not allowed" in exc.value.detail
+
+
+def test_fetch_tile_glb_rejects_relative_uri() -> None:
+    with pytest.raises(HTTPException) as exc:
+        service().fetch_tile_glb("leaf.glb")
+
+    assert exc.value.status_code == 422
+    assert exc.value.detail == "tile_uri must be an absolute http(s) URL."
+
+
+def test_fetch_tile_glb_rejects_empty_uri() -> None:
+    with pytest.raises(HTTPException) as exc:
+        service().fetch_tile_glb("   ")
+
+    assert exc.value.status_code == 422
+    assert exc.value.detail == "tile_uri must be a non-empty string."
+
+
 def _box(offset_m: float, half_m: float) -> list[float]:
     base = lla_to_ecef(BERLIN_LATITUDE, BERLIN_LONGITUDE)
     return [

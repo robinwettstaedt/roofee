@@ -23,6 +23,14 @@ from app.services.location.geocoding_service import DEFAULT_USER_AGENT
 
 TILES_TIMEOUT_SECONDS = 10.0
 
+# Hosts the photorealistic 3D Tiles renderer is allowed to download from. Anchors
+# the SSRF check on `fetch_tile_glb` — anything outside these hosts is refused.
+ALLOWED_TILE_HOSTS = frozenset(
+    {
+        "tile.googleapis.com",
+    }
+)
+
 
 @dataclass(frozen=True)
 class TileCandidate:
@@ -63,6 +71,42 @@ class Google3DTilesService:
     @property
     def has_api_key(self) -> bool:
         return bool(self._api_key)
+
+    def fetch_tile_glb(self, uri: str, session: str | None = None) -> bytes:
+        """Fetch a single Google 3D Tile GLB by absolute URL.
+
+        The frontend Photorealistic Tiles renderer hands us back a tile content
+        URL (without key/session — those are query params the SDK appends at
+        fetch time). We:
+
+        1. Refuse anything that isn't on the Google tile host (SSRF guard).
+        2. Strip any incoming `key=` and re-attach the server-side key. The
+           browser key may be referrer-restricted, but the backend key isn't,
+           so this is the one that's actually allowed to download tiles.
+        3. Preserve any existing `session=` on the URL, or apply the explicit
+           ``session`` arg if provided. Without a session token the GLB
+           endpoint returns 403 even with a valid API key.
+        """
+        if not self._api_key:
+            raise HTTPException(status_code=503, detail="Google API key is not configured.")
+        if not isinstance(uri, str) or not uri.strip():
+            raise HTTPException(status_code=422, detail="tile_uri must be a non-empty string.")
+
+        parsed = urlparse(uri.strip())
+        if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+            raise HTTPException(status_code=422, detail="tile_uri must be an absolute http(s) URL.")
+        if parsed.netloc.lower() not in ALLOWED_TILE_HOSTS:
+            raise HTTPException(
+                status_code=422,
+                detail=f"tile_uri host {parsed.netloc} is not allowed.",
+            )
+
+        params = dict(parse_qsl(parsed.query, keep_blank_values=True))
+        if "session" not in params and session:
+            params["session"] = session
+        params["key"] = self._api_key
+        normalized = urlunparse(parsed._replace(query=urlencode(params)))
+        return self._fetch_glb(normalized)
 
     def fetch_house_glb(
         self,

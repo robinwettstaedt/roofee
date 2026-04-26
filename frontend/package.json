@@ -12,6 +12,7 @@
     "@react-three/drei": "^10.0.0",
     "@react-three/fiber": "^9.0.0",
     "@react-three/postprocessing": "^3.0.0",
+    "3d-tiles-renderer": "^0.4.24",
     "next": "16.2.4",
     "react": "19.2.4",
     "react-dom": "19.2.4",

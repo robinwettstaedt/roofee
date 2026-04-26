@@ -50,3 +50,27 @@ class HouseModelMetadata(BaseModel):
     candidate_tile_count: int
     copyright: str | None = None
     glb_size_bytes: int
+
+
+class TileGlbRequest(BaseModel):
+    """Body for POST /api/location/tile-glb.
+
+    The frontend Photorealistic Tiles viewer captures the absolute tile content
+    URL (without `key`/`session` query params — the SDK appends those at fetch
+    time) and forwards it here so the backend can stream just that one tile.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    tile_uri: str = Field(min_length=1)
+    session: str | None = Field(default=None, min_length=1)
+    latitude: float | None = Field(default=None, ge=-90, le=90)
+    longitude: float | None = Field(default=None, ge=-180, le=180)
+
+
+class TileGlbMetadata(BaseModel):
+    provider: str = "google_3d_tiles"
+    tile_uri: str
+    glb_size_bytes: int
+    anchor_latitude: float | None = None
+    anchor_longitude: float | None = None

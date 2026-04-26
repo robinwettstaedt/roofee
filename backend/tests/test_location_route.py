@@ -81,3 +81,64 @@ def test_house_model_route_returns_400_without_anchor(monkeypatch) -> None:
 
     assert response.status_code == 400
     assert response.json()["detail"] == "Provide either address or latitude and longitude."
+
+
+def test_tile_glb_route_returns_glb_with_metadata_header(monkeypatch) -> None:
+    glb_bytes = b"glTF" + b"\x02\x00\x00\x00" + b"\x0c\x00\x00\x00"
+    captured: dict[str, object] = {}
+
+    class FakeTilesService:
+        def fetch_tile_glb(self, uri: str, session: str | None = None) -> bytes:
+            captured["uri"] = uri
+            captured["session"] = session
+            return glb_bytes
+
+    monkeypatch.setattr(location.settings, "google_api_key", "test-key")
+    monkeypatch.setattr(location.settings, "google_maps_api_key", None)
+    app.dependency_overrides[get_google_3d_tiles_service] = lambda: FakeTilesService()
+    try:
+        response = TestClient(app).post(
+            "/api/location/tile-glb",
+            json={
+                "tile_uri": "https://tile.googleapis.com/v1/3dtiles/leaf.glb",
+                "session": "session-xyz",
+                "latitude": 52.521,
+                "longitude": 13.406,
+            },
+        )
+    finally:
+        app.dependency_overrides.clear()
+
+    assert response.status_code == 200
+    assert response.headers["content-type"] == "model/gltf-binary"
+    assert response.content == glb_bytes
+    metadata = json.loads(response.headers["Roofee-Metadata"])
+    assert metadata["tile_uri"] == "https://tile.googleapis.com/v1/3dtiles/leaf.glb"
+    assert metadata["glb_size_bytes"] == len(glb_bytes)
+    assert metadata["anchor_latitude"] == 52.521
+    assert metadata["anchor_longitude"] == 13.406
+    assert captured == {
+        "uri": "https://tile.googleapis.com/v1/3dtiles/leaf.glb",
+        "session": "session-xyz",
+    }
+
+
+def test_tile_glb_route_returns_503_without_api_key(monkeypatch) -> None:
+    monkeypatch.setattr(location.settings, "google_api_key", None)
+    monkeypatch.setattr(location.settings, "google_maps_api_key", None)
+
+    response = TestClient(app).post(
+        "/api/location/tile-glb",
+        json={"tile_uri": "https://tile.googleapis.com/v1/3dtiles/leaf.glb"},
+    )
+
+    assert response.status_code == 503
+    assert response.json()["detail"] == "Google API key is not configured."
+
+
+def test_tile_glb_route_validates_required_uri(monkeypatch) -> None:
+    monkeypatch.setattr(location.settings, "google_api_key", "test-key")
+    monkeypatch.setattr(location.settings, "google_maps_api_key", None)
+
+    response = TestClient(app).post("/api/location/tile-glb", json={})
+    assert response.status_code == 422
