@@ -5,10 +5,11 @@ Practical, copy-paste instructions for getting both servers up. Pairs with
 
 ## Prerequisites
 
-- **Node.js** matching `.tool-versions` (currently `nodejs 22.21.1`). If you use
-  `asdf`, run `asdf install` from the repo root once.
+- **Node.js 22.x**. This setup was verified with Node 22.14.0.
 - **Python 3.11+**. The backend currently builds its venv with whatever
   `python3` resolves to on `PATH`. Python 3.13 is known good.
+- **Git LFS** for the RID obstruction checkpoint under
+  `backend/models/obstruction_detection/`.
 - A working internet connection on first install (PyPI, npm, Hugging Face).
 
 ## One-time setup
@@ -17,10 +18,22 @@ From the repo root (`roofee/`):
 
 ```bash
 npm install                  # frontend deps
-npm run install:backend      # creates backend/.venv and installs backend[dev]
+npm run install:backend      # creates backend/.venv and installs backend[dev,vision]
+git lfs install
+git lfs pull                 # fetches large model weights such as RID .h5 files
 ```
 
-Then create the two env files (both are git-ignored):
+The repository expects these CV weights to be present after `git lfs pull`:
+
+- `backend/models/building_outline/yolov8m-building-segmentation-best.pt`
+  — YOLOv8 building/roof outline segmentation, about 52 MB.
+- `backend/models/obstruction_detection/rid_unet_resnet34_best.h5`
+  — RID U-Net roof obstruction segmentation, about 94 MB.
+
+Then create the two env files (both are git-ignored) for the full
+address-based workflow. The servers can start without these files, but Google
+Maps autocomplete and Google-backed building lookup will be disabled or return
+missing-key errors.
 
 **`backend/.env`** — copy from `backend/.env.example` and fill in:
 
@@ -111,12 +124,20 @@ npm run install:backend
 - **`NEXT_PUBLIC_GOOGLE_MAPS_API_KEY not set` in the browser console.** Set it
   in `frontend/.env.local` and restart `npm run dev:frontend` (Next.js only
   reads env files at startup).
-- **`asdf: No version is set for command node`.** You're missing the Node
-  version pinned in `.tool-versions`. Run `asdf install` from the repo root,
-  or install Node 22.21.1 some other way.
-- **Heavy ML deps (TensorFlow, ultralytics).** First import after a fresh venv
-  may take a while. The RID obstruction model only loads on the first
-  `POST /api/roof/obstructions` request, not at server startup.
+- **`asdf: No version is set for command node`.** Install or select a Node 22.x
+  runtime, for example with `asdf install nodejs 22.14.0` and
+  `asdf local nodejs 22.14.0`.
+- **Roof-outline model missing.** The building/roof outline detector prefers
+  the local LFS file at
+  `backend/models/building_outline/yolov8m-building-segmentation-best.pt`.
+  If that file is missing, it falls back to downloading
+  `keremberke/yolov8m-building-segmentation` from Hugging Face.
+- **RID obstruction model runtime.** `git lfs pull` fetches the
+  `rid_unet_resnet34_best.h5` checkpoint, but the original RID runtime needs
+  TensorFlow 2.10 / `segmentation-models`, which requires a Python 3.10-era
+  environment. With the default Python 3.11+ backend venv, normal routes and
+  tests work, but real `POST /api/roof/obstructions` inference returns `503`
+  until RID is run in a compatible environment or converted to another runtime.
 
 ## Useful endpoints to verify the stack
 

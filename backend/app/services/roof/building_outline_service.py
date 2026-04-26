@@ -5,6 +5,7 @@ from typing import Any
 
 from PIL import Image
 
+from app.core.config import settings
 from app.models.roof import BoundingBoxPixels, RoofOutline
 
 
@@ -21,12 +22,14 @@ class BuildingOutlineService:
         self,
         model_id: str = DEFAULT_BUILDING_OUTLINE_MODEL_ID,
         model_filename: str = DEFAULT_BUILDING_OUTLINE_MODEL_FILE,
+        local_model_path: Path | None = None,
         confidence_threshold: float = 0.25,
         iou_threshold: float = 0.45,
         max_detections: int = 1000,
     ) -> None:
         self.model_id = model_id
         self.model_filename = model_filename
+        self.local_model_path = local_model_path
         self.confidence_threshold = confidence_threshold
         self.iou_threshold = iou_threshold
         self.max_detections = max_detections
@@ -76,7 +79,11 @@ class BuildingOutlineService:
                 'pip install -e ".[vision]".'
             ) from exc
 
-        weights_path = hf_hub_download(repo_id=self.model_id, filename=self.model_filename)
+        weights_path = (
+            str(self.local_model_path)
+            if self.local_model_path is not None and self.local_model_path.is_file()
+            else hf_hub_download(repo_id=self.model_id, filename=self.model_filename)
+        )
         self._model = YOLO(weights_path)
         return self._model
 
@@ -196,4 +203,8 @@ class BuildingOutlineService:
 
 
 def get_building_outline_service() -> BuildingOutlineService:
-    return BuildingOutlineService()
+    return BuildingOutlineService(
+        model_id=settings.building_outline_model_id,
+        model_filename=settings.building_outline_model_file,
+        local_model_path=settings.building_outline_model_path,
+    )
