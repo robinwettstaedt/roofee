@@ -41,6 +41,7 @@ def get_house_model(
         anchor_latitude=latitude,
         anchor_longitude=longitude,
         radius_m=request.radius_m,
+        query_height_m=getattr(tiles_service, "query_height_m", None),
         geocoding=geocoding_metadata,
         tile=TileSelection(
             uri=selected_tile.uri,

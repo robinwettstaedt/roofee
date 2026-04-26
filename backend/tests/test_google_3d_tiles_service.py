@@ -14,12 +14,13 @@ BERLIN_LONGITUDE = 13.409419
 GLB_BYTES = b"glTF" + b"\x02\x00\x00\x00" + b"\x0c\x00\x00\x00"
 
 
-def service() -> Google3DTilesService:
+def service(query_height_m: float = 100) -> Google3DTilesService:
     return Google3DTilesService(
         api_key="test-key",
         root_url="https://tile.googleapis.com/v1/3dtiles/root.json",
         max_radius_m=200,
         max_walk_depth=32,
+        query_height_m=query_height_m,
         timeout_seconds=3,
     )
 
@@ -169,10 +170,83 @@ def test_fetch_house_glb_rejects_radius_above_max() -> None:
     assert exc.value.detail == "radius_m must be 200 or smaller."
 
 
+def test_fetch_house_glb_includes_tiles_up_to_configured_query_height(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def fake_get(url: str, **kwargs: object) -> httpx.Response:
+        if url == "https://tile.googleapis.com/v1/3dtiles/root.json?key=test-key":
+            return _json_response(
+                "https://tile.googleapis.com/v1/3dtiles/root.json?key=test-key",
+                {
+                    "root": {
+                        "boundingVolume": {"box": _box_at_altitude(altitude_m=80, half_m=1)},
+                        "geometricError": 1,
+                        "content": {"uri": "elevated-roof.glb"},
+                    }
+                },
+            )
+        if url == "https://tile.googleapis.com/v1/3dtiles/elevated-roof.glb?key=test-key":
+            return httpx.Response(200, request=httpx.Request("GET", url), content=GLB_BYTES)
+        raise AssertionError(f"Unexpected URL: {url}")
+
+    monkeypatch.setattr(google_3d_tiles_service.httpx, "get", fake_get)
+
+    glb_bytes, selected_tile, candidate_count, _copyright_text = service(query_height_m=100).fetch_house_glb(
+        BERLIN_LATITUDE,
+        BERLIN_LONGITUDE,
+        radius_m=20,
+    )
+
+    assert glb_bytes == GLB_BYTES
+    assert selected_tile.uri.endswith("/elevated-roof.glb?key=test-key")
+    assert candidate_count == 1
+
+
+def test_fetch_house_glb_excludes_tiles_above_configured_query_height(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def fake_get(url: str, **kwargs: object) -> httpx.Response:
+        return _json_response(
+            url,
+            {
+                "root": {
+                    "boundingVolume": {"box": _box_at_altitude(altitude_m=130, half_m=1)},
+                    "content": {"uri": "too-high.glb"},
+                }
+            },
+        )
+
+    monkeypatch.setattr(google_3d_tiles_service.httpx, "get", fake_get)
+
+    with pytest.raises(HTTPException) as exc:
+        service(query_height_m=100).fetch_house_glb(BERLIN_LATITUDE, BERLIN_LONGITUDE, radius_m=20)
+
+    assert exc.value.status_code == 404
+    assert exc.value.detail == "No 3D tiles intersected the requested radius around the anchor."
+
+
 def _box(offset_m: float, half_m: float) -> list[float]:
     base = lla_to_ecef(BERLIN_LATITUDE, BERLIN_LONGITUDE)
     return [
         base[0] + offset_m,
+        base[1],
+        base[2],
+        half_m,
+        0,
+        0,
+        0,
+        half_m,
+        0,
+        0,
+        0,
+        half_m,
+    ]
+
+
+def _box_at_altitude(altitude_m: float, half_m: float) -> list[float]:
+    base = lla_to_ecef(BERLIN_LATITUDE, BERLIN_LONGITUDE, altitude_m=altitude_m)
+    return [
+        base[0],
         base[1],
         base[2],
         half_m,

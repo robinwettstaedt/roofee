@@ -186,6 +186,7 @@ export type HouseModelMetadata = {
   anchor_latitude: number;
   anchor_longitude: number;
   radius_m: number;
+  query_height_m?: number | null;
   geocoding: GeocodingMetadata;
   tile: TileSelection;
   candidate_tile_count: number;

@@ -45,6 +45,7 @@ class HouseModelMetadata(BaseModel):
     anchor_latitude: float
     anchor_longitude: float
     radius_m: float
+    query_height_m: float | None = None
     geocoding: GeocodingMetadata
     tile: TileSelection
     candidate_tile_count: int

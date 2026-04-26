@@ -50,6 +50,7 @@ class ModelAssetService:
                 "anchor_latitude": latitude,
                 "anchor_longitude": longitude,
                 "radius_m": radius_m,
+                "query_height_m": getattr(tiles_service, "query_height_m", None),
                 "tile_uri": selected_tile.uri,
                 "tile_geometric_error": selected_tile.geometric_error,
                 "candidate_tile_count": candidate_count,

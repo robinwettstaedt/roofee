@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from math import sqrt
 from typing import Any
 from urllib.parse import parse_qsl, urlencode, urljoin, urlparse, urlunparse
 
@@ -36,8 +37,9 @@ class TileCandidate:
 
 @dataclass
 class WalkContext:
-    query_ecef: Vector3
+    query_center_ecef: Vector3
     query_radius_m: float
+    ranking_anchor_ecef: Vector3
     api_key: str
     max_depth: int
     candidates: list[TileCandidate] = field(default_factory=list)
@@ -52,17 +54,23 @@ class Google3DTilesService:
         root_url: str,
         max_radius_m: float,
         max_walk_depth: int,
+        query_height_m: float = 100.0,
         timeout_seconds: float = TILES_TIMEOUT_SECONDS,
     ) -> None:
         self._api_key = api_key
         self._root_url = root_url
         self._max_radius_m = max_radius_m
         self._max_walk_depth = max_walk_depth
+        self._query_height_m = max(0.0, query_height_m)
         self._timeout_seconds = timeout_seconds
 
     @property
     def has_api_key(self) -> bool:
         return bool(self._api_key)
+
+    @property
+    def query_height_m(self) -> float:
+        return self._query_height_m
 
     def fetch_house_glb(
         self,
@@ -81,9 +89,12 @@ class Google3DTilesService:
                 detail=f"radius_m must be {self._max_radius_m:.0f} or smaller.",
             )
 
+        ranking_anchor_ecef = lla_to_ecef(latitude, longitude)
+        half_query_height_m = self._query_height_m / 2
         context = WalkContext(
-            query_ecef=lla_to_ecef(latitude, longitude),
-            query_radius_m=radius_m,
+            query_center_ecef=lla_to_ecef(latitude, longitude, altitude_m=half_query_height_m),
+            query_radius_m=sqrt((radius_m * radius_m) + (half_query_height_m * half_query_height_m)),
+            ranking_anchor_ecef=ranking_anchor_ecef,
             api_key=self._api_key,
             max_depth=self._max_walk_depth,
         )
@@ -135,7 +146,7 @@ class Google3DTilesService:
         if not sphere_intersects(
             tile_center,
             tile_radius,
-            context.query_ecef,
+            context.query_center_ecef,
             context.query_radius_m,
         ):
             return
@@ -157,7 +168,7 @@ class Google3DTilesService:
                         TileCandidate(
                             uri=resolved,
                             geometric_error=float(tile.get("geometricError") or 0.0),
-                            distance_m=euclidean_distance(context.query_ecef, tile_center),
+                            distance_m=euclidean_distance(context.ranking_anchor_ecef, tile_center),
                             bounding_sphere_center=tile_center,
                             bounding_sphere_radius_m=tile_radius,
                             transform=world_transform,
@@ -279,6 +290,7 @@ def get_google_3d_tiles_service() -> Google3DTilesService:
         root_url=settings.google_3d_tiles_root_url,
         max_radius_m=settings.google_3d_tiles_max_radius_m,
         max_walk_depth=settings.google_3d_tiles_max_walk_depth,
+        query_height_m=settings.google_3d_tiles_query_height_m,
         timeout_seconds=settings.google_timeout_seconds,
     )
 
