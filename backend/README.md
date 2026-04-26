@@ -4,30 +4,37 @@ FastAPI REST API for the Roofee app.
 
 ## Energy planning flow
 
-Roofee turns a home into a practical energy-system proposal. The backend flow is:
+Roofee turns a home into a practical energy-system proposal. The intended
+product flow has two frontend/backend exchanges: the frontend first submits the
+project inputs, then it sends the selected roof outline IDs. The backend owns
+the remaining geometry, layout, sizing, BOM, and visual-placement work.
 
 ```mermaid
-flowchart TD
-    A["User enters project address"]
-    A --> B["User enters mandatory and optional project inputs"]
-    B --> C["User may upload a 3D model"]
-    C --> D["✅ Backend checks what is present, missing, or estimated"]
-    D --> E["✅ Backend resolves location and fetches house data"]
-    E --> F["✅ Backend fetches location-based solar and weather inputs"]
-    F --> G["✅ Backend analyzes the roof"]
-    G --> R["✅ Backend registers satellite roof to backend 3D top-down render"]
-    R --> P["✅ Backend extracts roof planes and usable regions"]
-    P --> H["Backend checks where panels can fit"]
-    H --> I["Backend creates good, better, and best options"]
-    I --> J["Backend creates the BOM"]
-    J --> K["Backend prepares the roof visual"]
-    K --> L["Frontend shows proposal, BOM, warnings, and panel placement"]
+sequenceDiagram
+    participant Frontend
+    participant Backend
 
-    classDef frontend fill:#dbeafe,stroke:#2563eb,color:#111827
-    classDef backend fill:#dcfce7,stroke:#16a34a,color:#111827
-
-    class A,B,C,L frontend
-    class D,E,F,G,R,H,I,J,K backend
+    Frontend->>Frontend: User enters project address
+    Frontend->>Frontend: User enters mandatory and optional project inputs
+    Frontend->>Frontend: User may upload a 3D model
+    Frontend->>Backend: POST /api/recommendations with project inputs and optional model_file
+    Backend->>Backend: ✅ Check what is present, missing, or estimated
+    Backend->>Backend: ✅ Resolve location and fetch house data
+    Backend->>Backend: ✅ Fetch location-based solar and weather inputs
+    Backend->>Backend: ✅ Analyze roof outlines from satellite imagery
+    Backend-->>Frontend: Return satellite image, detected roof outlines, warnings, and input validation summary
+    Frontend->>Frontend: User selects the target roof outline IDs
+    Frontend->>Backend: POST /api/roof/geometry with selected roof IDs
+    Backend->>Backend: ✅ Revalidate selected roof and detect obstructions
+    Backend->>Backend: ✅ Load or fetch the project GLB and render it top-down
+    Backend->>Backend: ✅ Register satellite roof polygons to the backend 3D render
+    Backend->>Backend: ✅ Extract roof planes and usable regions
+    Backend->>Backend: Check where panels can fit
+    Backend->>Backend: Create good, better, and best options
+    Backend->>Backend: Create the BOM
+    Backend->>Backend: Prepare the roof visual
+    Backend-->>Frontend: Return proposal, BOM, warnings, and panel placement
+    Frontend->>Frontend: Show proposal, BOM, warnings, and panel placement
 ```
 
 1. **Find the home**
@@ -112,9 +119,9 @@ flowchart TD
    model_file=<optional .glb file>
    ```
 
-   ✅ Implemented: V1 validates the submitted inputs and optional `.glb` file, fetches baseline monthly solar/weather inputs from PVGIS using the submitted coordinates, fetches Google Solar overhead imagery, and returns a validation summary. Roof analysis, sizing, BOM generation, and 3D panel placement are later steps behind the same route.
+   ✅ Implemented: V1 validates the submitted inputs and optional `.glb` file, fetches baseline monthly solar/weather inputs from PVGIS using the submitted coordinates, fetches Google Solar overhead imagery, detects candidate roof/building outlines, caches house metadata for later 3D model lookup, and returns a validation summary. Sizing, BOM generation, and final panel placement are later steps behind the post-selection geometry/layout flow.
 
-   The frontend must send `latitude` and `longitude` from Google Places with the selected address. For a standalone Google Photorealistic 3D Tiles GLB, call `POST /api/location/house-model` with the same coordinates or with an address.
+   The frontend must send `latitude` and `longitude` from Google Places with the selected address. `POST /api/location/house-model` still exists as a standalone/debug route for fetching a Google Photorealistic 3D Tiles GLB, but the intended proposal flow lets the backend load or fetch the model during `POST /api/roof/geometry`.
 
    Roof outline selection contract:
 
@@ -149,7 +156,7 @@ flowchart TD
    }
    ```
 
-   The frontend should render `roof_analysis.satellite_image_url` and draw/select from `roof_outlines[*].bounding_box_pixels`. After the user selects the exact target roof, send only backend-provided IDs back:
+   The frontend should render `roof_analysis.satellite_image_url` and draw/select from `roof_outlines[*].bounding_box_pixels`. In the intended product flow, the second frontend/backend call should send those selected IDs to `POST /api/roof/geometry`, which runs the rest of the backend geometry pipeline. `POST /api/roof/selection` remains available as a lightweight validation/debug route with the same selected-roof payload:
 
    ```http
    POST /api/roof/selection
@@ -200,9 +207,9 @@ flowchart TD
    }
    ```
 
-   Roof obstruction analysis contract:
+   Roof obstruction analysis compatibility contract:
 
-   After the frontend has selected the exact roof outline IDs, call the obstruction route with the same payload shape:
+   `POST /api/roof/obstructions` remains available as a standalone diagnostic route. The backend-owned geometry pipeline calls the same obstruction service internally, so the frontend does not need to call this route in the normal proposal flow.
 
    ```http
    POST /api/roof/obstructions
@@ -247,9 +254,9 @@ flowchart TD
 
    The RID detector loads `backend/models/obstruction_detection/rid_unet_resnet34_best.h5` lazily on the first obstruction request and keeps the model in memory for the backend process. Configure `ROOFEE_RID_MODEL_CHECKPOINT_PATH` if the checkpoint is mounted somewhere else. The original RID runtime uses TensorFlow 2.10 and `segmentation-models==1.0.1`; run the backend with a compatible Python/TensorFlow environment when enabling real obstruction inference. Normal route and service tests use fake detectors and do not load the model.
 
-   Roof-to-3D registration contract:
+   Roof-to-3D registration compatibility contract:
 
-   After the frontend has selected the exact satellite roof outline IDs and loaded a GLB, it generates a deterministic top-down orthographic render of the model. The render must be independent of the user's current orbit camera. Send the PNG and render metadata to:
+   `POST /api/roof/registration` is still available for diagnostics and compatibility when a caller already has a deterministic top-down orthographic render. The render must be independent of the user's current orbit camera. Send the PNG and render metadata to:
 
    ```http
    POST /api/roof/registration
@@ -335,8 +342,8 @@ flowchart TD
 
 3. **Upload optional 3D model**
    - The user may optionally upload a 3D model at the start.
-   - The model can improve or override address-derived roof geometry.
-   - If a model is uploaded, the backend validates that the file can be used for roof analysis.
+   - V1 validates `.glb` structure and records whether a model was provided.
+   - Address-derived Google 3D Tiles are currently the implemented backend-owned geometry source for `POST /api/roof/geometry`; using the uploaded model as the geometry source is still future work.
 
 4. **Fetch location data**
    - The backend resolves the address into an exact location and fetches available house/building data from external map providers.
@@ -402,16 +409,30 @@ The backend is organized around service responsibilities rather than one large c
   - Fetch map, tile, building, or imagery data.
   - Keep Google-specific API details isolated from the rest of the backend.
 
-- `ModelIngestionService`
-  - Accepts optional uploaded 3D model data.
-  - Validates file type, structure, and basic suitability before the model is used to improve roof calculations.
-  - The address remains mandatory even when a model is uploaded, because location is needed for solar yield, climate, and regional assumptions.
+- `HouseDataService`
+  - Fetches Google Solar building insights and data layers.
+  - Converts the Google Solar RGB GeoTIFF into the cached overhead PNG used by roof analysis.
+  - Stores house asset metadata used by later backend-owned 3D model lookup.
+  - Proxies Google 3D Tiles assets for standalone/debug model loading.
+
+- `Google3DTilesService`
+  - Walks Google Photorealistic 3D Tiles around the selected anchor.
+  - Selects the best intersecting leaf GLB and returns the model bytes plus tile metadata.
+
+- `ModelAssetService`
+  - Loads a cached house GLB for an asset when available.
+  - Fetches and caches the Google 3D Tiles GLB when the geometry pipeline needs it.
+
+- `ModelGeometryService`
+  - Parses GLB mesh geometry with `trimesh`.
+  - Generates a deterministic backend top-down render and render metadata.
+  - Extracts roof planes by filtering upward faces inside the selected roof footprint and clustering connected faces by normal/plane offset.
 
 - `ProjectInputService`
   - Handles the start form where the user enters mandatory and optional inputs.
   - Checks which mandatory inputs are present or missing.
   - Marks which optional inputs were estimated.
-  - Converts user-friendly units into backend units.
+  - Validates optional uploaded `.glb` files structurally.
 
 - `RoofAnalysisService`
   - Detects address-derived building/roof outlines.
@@ -428,8 +449,18 @@ The backend is organized around service responsibilities rather than one large c
   - Revalidates selected satellite roof outline IDs.
   - Matches satellite and top-down model-render features with ORB, then AKAZE as fallback.
   - Estimates only a similarity transform with RANSAC.
-  - Maps the selected satellite roof polygon into deterministic render-pixel space.
+  - Maps each selected satellite roof polygon into deterministic render-pixel and model `x/z` space.
   - Reports transform quality, confidence, and warnings for low-feature or unreliable alignments.
+
+- `RoofGeometryPipelineService`
+  - Orchestrates the post-selection backend geometry flow behind `POST /api/roof/geometry`.
+  - Coordinates selected roof validation, obstruction detection, GLB loading, backend rendering, registration, roof-plane extraction, and usable-region subtraction.
+
+- `UsableRoofGeometryService`
+  - Subtracts roof-edge setbacks and buffered obstructions from each extracted roof plane with Shapely.
+  - Returns split usable regions and traceable removed areas.
+
+Planned services that are referenced by the product flow but not implemented yet:
 
 - `SolarLayoutService`
   - Takes usable roof geometry and candidate PV modules from the catalog.
@@ -457,7 +488,7 @@ The backend is organized around service responsibilities rather than one large c
 
 - `PanelPlacementService`
   - Converts the selected solar layout into frontend-renderable geometry on the best available roof representation.
-  - Uses an uploaded 3D model when available; otherwise uses address-derived roof geometry.
+  - Uses the backend-owned roof geometry from `POST /api/roof/geometry`.
   - This is separate from BOM generation because visual placement is about geometry, not materials.
 
 Suggested mature service layout:
@@ -467,33 +498,31 @@ app/services/
   catalog_service.py
   location/
     geocoding_service.py
-    google_maps_client.py
-    google_tiles_client.py
+    google_3d_tiles_service.py
   model/
-    model_ingestion_service.py
-    model_validation_service.py
-    panel_placement_service.py
-  project/
-    project_input_service.py
-    project_validation_service.py
+    model_asset_service.py
+    model_geometry_service.py
+    panel_placement_service.py        # planned
+  project_input_service.py
   roof/
     roof_analysis_service.py
     obstruction_service.py
     registration_service.py
-    solar_layout_service.py
+    geometry_pipeline_service.py
+    usable_geometry_service.py
+    solar_layout_service.py           # planned
   sizing/
-    energy_sizing_service.py
-    pv_sizing_service.py
-    battery_sizing_service.py
-    heat_pump_sizing_service.py
+    energy_sizing_service.py          # planned
+    pv_sizing_service.py              # planned
+    battery_sizing_service.py         # planned
+    heat_pump_sizing_service.py       # planned
   bom/
-    bom_service.py
-    component_selection_service.py
-  external/
-    pvgis_client.py
+    bom_service.py                    # planned
+    component_selection_service.py    # planned
+  pvgis_service.py
 ```
 
-For the hackathon version, these may start as fewer files. The boundaries should still stay clear:
+The boundaries should stay clear:
 
 - roof and layout logic decides what is physically possible
 - project input logic handles mandatory inputs, optional inputs, missing values, and estimates
