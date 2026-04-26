@@ -107,12 +107,23 @@ export function RoofPicker({
   // Rank once: largest * most-confident first. Indexes drive the "01", "02"
   // captions and the stagger animation, so the auto-suggested roof reads "01".
   const ranked = useMemo(() => rankOutlines(outlines), [outlines]);
+  const outlinesById = useMemo(
+    () => new Map(outlines.map((o) => [o.id, o])),
+    [outlines],
+  );
 
   const [selectedIds, setSelectedIds] = useState<Set<string>>(() => new Set());
   const [hoveredId, setHoveredId] = useState<string | null>(null);
   const [imgSize, setImgSize] = useState<{ w: number; h: number } | null>(null);
   const imgRef = useRef<HTMLImageElement>(null);
   const didPreselect = useRef(false);
+
+  // Adjacency tolerance scales with image — small bbox gaps from segmentation
+  // imprecision (a few pixels between two row-house polygons that physically
+  // share a wall) shouldn't disqualify them as "touching".
+  const adjacencyThreshold = imgSize
+    ? Math.max(imgSize.w, imgSize.h) * 0.025
+    : 0;
 
   // Preselect the building under the geocoded pin (image center). If the
   // center falls inside a polygon, that's almost certainly the user's house;
@@ -130,10 +141,31 @@ export function RoofPicker({
 
   function toggle(id: string) {
     setSelectedIds((prev) => {
-      const next = new Set(prev);
-      if (next.has(id)) next.delete(id);
-      else next.add(id);
-      return next;
+      // Click an already-selected polygon → deselect it.
+      if (prev.has(id)) {
+        const next = new Set(prev);
+        next.delete(id);
+        return next;
+      }
+
+      // Empty → start the selection with this one.
+      if (prev.size === 0) return new Set([id]);
+
+      // We cap at two and require physical adjacency (touching/sharing a wall).
+      // If the cap is reached or the click target isn't adjacent to *every*
+      // currently selected polygon, replace the selection entirely — the user
+      // is signalling "this one, not the other(s)", not "add to the group".
+      const clicked = outlinesById.get(id);
+      if (!clicked) return prev;
+
+      if (prev.size >= 2) return new Set([id]);
+
+      const allAdjacent = [...prev].every((sid) => {
+        const sel = outlinesById.get(sid);
+        return sel ? areAdjacent(sel, clicked, adjacencyThreshold) : false;
+      });
+
+      return allAdjacent ? new Set([...prev, id]) : new Set([id]);
     });
   }
 
@@ -179,6 +211,8 @@ export function RoofPicker({
             <p className="mt-2 text-[14px] text-dust">
               We found {outlines.length} structure{outlines.length === 1 ? "" : "s"} from
               the satellite image. Click the home you want to design panels for.
+              You can include a touching neighbour (e.g. a row-house wing) by
+              clicking it as well.
             </p>
           </div>
 
@@ -467,6 +501,23 @@ function pickInitialId(
     }
   }
   return bestId;
+}
+
+function areAdjacent(
+  a: RoofOutline,
+  b: RoofOutline,
+  threshold: number,
+): boolean {
+  // Bounding-box proximity: compute the gap on each axis. If a bbox is to the
+  // left of the other, gapX = leftEdgeOfRight - rightEdgeOfLeft; if they
+  // overlap on that axis, gap is 0. Two buildings count as adjacent when both
+  // axis gaps are within the tolerance — i.e. they overlap or are separated
+  // only by segmentation noise, not by a street/garden.
+  const ax = a.bounding_box_pixels;
+  const bx = b.bounding_box_pixels;
+  const gapX = Math.max(0, Math.max(ax.x_min, bx.x_min) - Math.min(ax.x_max, bx.x_max));
+  const gapY = Math.max(0, Math.max(ax.y_min, bx.y_min) - Math.min(ax.y_max, bx.y_max));
+  return Math.max(gapX, gapY) <= threshold;
 }
 
 function pointInPolygon(x: number, y: number, polygon: number[][]): boolean {
