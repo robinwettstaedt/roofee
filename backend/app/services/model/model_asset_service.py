@@ -20,16 +20,34 @@ class ModelAssetService:
         tiles_service: Google3DTilesService,
     ) -> bytes:
         model_path = house_data_service.house_model_cache_path(asset_id)
-        if model_path.is_file():
+        metadata = house_data_service.house_asset_metadata(asset_id)
+        selected_tile = metadata.get("selected_3d_tile")
+        selected_tile_uri = selected_tile.get("uri") if isinstance(selected_tile, dict) else None
+        if model_path.is_file() and not isinstance(selected_tile_uri, str):
             try:
                 return model_path.read_bytes()
             except OSError as exc:
                 raise HTTPException(status_code=422, detail="Cached house model could not be loaded.") from exc
 
-        metadata = house_data_service.house_asset_metadata(asset_id)
-        center = metadata.get("building_center")
+        if isinstance(selected_tile_uri, str):
+            glb_bytes = tiles_service.fetch_selected_glb(selected_tile_uri)
+            self._write_model_cache(
+                model_path,
+                glb_bytes,
+                house_data_service.house_model_metadata_cache_path(asset_id),
+                {
+                    "provider": "google_3d_tiles",
+                    "selection_source": "frontend_selected_tile",
+                    "tile_uri": selected_tile_uri,
+                    "tile_geometric_error": selected_tile.get("geometric_error"),
+                    "glb_size_bytes": len(glb_bytes),
+                },
+            )
+            return glb_bytes
+
+        center = metadata.get("model_anchor") or metadata.get("building_center")
         if not isinstance(center, dict):
-            raise HTTPException(status_code=422, detail="House asset metadata has no building center.")
+            raise HTTPException(status_code=422, detail="House asset metadata has no model anchor.")
         try:
             latitude = float(center["latitude"])
             longitude = float(center["longitude"])

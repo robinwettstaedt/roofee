@@ -6,11 +6,28 @@ from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import Response
 
 from app.core.config import settings
-from app.models.location import GeocodingMetadata, HouseModelMetadata, HouseModelRequest, TileSelection
+from app.models.location import (
+    GeocodeRequest,
+    GeocodeResponse,
+    GeocodingMetadata,
+    HouseModelMetadata,
+    HouseModelRequest,
+    TileSelection,
+)
 from app.services.location.geocoding_service import GeocodingService, get_geocoding_service
 from app.services.location.google_3d_tiles_service import Google3DTilesService, get_google_3d_tiles_service
 
 router = APIRouter()
+
+
+@router.post("/location/geocode", response_model=GeocodeResponse)
+def geocode_address(
+    request: GeocodeRequest,
+    geocoding_service: GeocodingService = Depends(get_geocoding_service),
+) -> GeocodeResponse:
+    _require_google_api_key()
+    metadata, latitude, longitude = geocoding_service.geocode(request.address)
+    return GeocodeResponse(latitude=latitude, longitude=longitude, geocoding=metadata)
 
 
 @router.post(

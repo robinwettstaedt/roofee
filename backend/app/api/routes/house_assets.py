@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, Request
+from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import FileResponse, JSONResponse, Response
 
 from app.services.house_data_service import HouseDataService, get_house_data_service
@@ -15,6 +15,17 @@ def get_overhead_image(
         house_data_service.overhead_image_path(asset_id),
         media_type="image/png",
     )
+
+
+@router.get("/house-assets/{asset_id}/house.glb")
+def get_house_model_asset(
+    asset_id: str,
+    house_data_service: HouseDataService = Depends(get_house_data_service),
+) -> FileResponse:
+    model_path = house_data_service.house_model_cache_path(asset_id)
+    if not model_path.is_file():
+        raise HTTPException(status_code=404, detail="House model not found.")
+    return FileResponse(model_path, media_type="model/gltf-binary")
 
 
 @router.get("/google-3d-tiles/{tile_path:path}")

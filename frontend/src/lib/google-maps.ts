@@ -49,6 +49,7 @@ type AutocompleteSuggestionStatic = {
 
 type GoogleMapsNamespace = {
   maps: {
+    importLibrary: (name: string) => Promise<unknown>;
     places: {
       AutocompleteSuggestion: AutocompleteSuggestionStatic;
       AutocompleteSessionToken: SessionTokenCtor;

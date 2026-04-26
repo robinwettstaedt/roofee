@@ -5,6 +5,12 @@ import * as THREE from "three";
 
 type UpAxis = "x" | "y" | "z";
 
+declare global {
+  interface Window {
+    __roofee?: Record<string, unknown>;
+  }
+}
+
 function detectUpAxis(size: THREE.Vector3): UpAxis {
   if (size.y <= size.x && size.y <= size.z) return "y";
   if (size.z <= size.x && size.z <= size.y) return "z";
@@ -43,34 +49,38 @@ export function House({
     box.getCenter(center);
     wrapper.position.set(-center.x, -box.min.y, -center.z);
 
-    if (typeof window !== "undefined") {
-      const finalBox = new THREE.Box3().setFromObject(wrapper);
-      const finalSize = new THREE.Vector3();
-      finalBox.getSize(finalSize);
-      const finalCenter = new THREE.Vector3();
-      finalBox.getCenter(finalCenter);
-      console.info(
-        `[House] up=${upAxis} raw=${rawSize.toArray().map((n) => n.toFixed(2)).join(",")} final=${finalSize.toArray().map((n) => n.toFixed(2)).join(",")} center=${finalCenter.toArray().map((n) => n.toFixed(2)).join(",")} ymax=${finalBox.max.y.toFixed(2)}`,
-      );
-      // expose for debugging via Playwright
-      (window as unknown as { __roofee?: Record<string, unknown> }).__roofee = {
-        upAxis,
-        bbox: {
-          min: finalBox.min.toArray(),
-          max: finalBox.max.toArray(),
-          size: finalSize.toArray(),
-          center: finalCenter.toArray(),
-        },
-        houseRoot: wrapper,
-      };
-    }
-
+    wrapper.userData.roofeeUpAxis = upAxis;
+    wrapper.userData.roofeeRawSize = rawSize.toArray();
     return wrapper;
   }, [scene, forceUpAxis]);
 
   useEffect(() => {
     onReady?.(oriented);
   }, [oriented, onReady]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const finalBox = new THREE.Box3().setFromObject(oriented);
+    const finalSize = new THREE.Vector3();
+    finalBox.getSize(finalSize);
+    const finalCenter = new THREE.Vector3();
+    finalBox.getCenter(finalCenter);
+    const rawSize = oriented.userData.roofeeRawSize as number[] | undefined;
+    const upAxis = oriented.userData.roofeeUpAxis as UpAxis | undefined;
+    console.info(
+      `[House] up=${upAxis ?? "?"} raw=${(rawSize ?? []).map((n) => n.toFixed(2)).join(",")} final=${finalSize.toArray().map((n) => n.toFixed(2)).join(",")} center=${finalCenter.toArray().map((n) => n.toFixed(2)).join(",")} ymax=${finalBox.max.y.toFixed(2)}`,
+    );
+    window.__roofee = {
+      upAxis,
+      bbox: {
+        min: finalBox.min.toArray(),
+        max: finalBox.max.toArray(),
+        size: finalSize.toArray(),
+        center: finalCenter.toArray(),
+      },
+      houseRoot: oriented,
+    };
+  }, [oriented]);
 
   return <primitive object={oriented} />;
 }

@@ -26,10 +26,22 @@ class HouseModelRequest(_AnchorRequest):
     radius_m: float = Field(default=50.0, gt=0, le=MAX_HOUSE_MODEL_RADIUS_M)
 
 
+class GeocodeRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    address: str = Field(min_length=1)
+
+
 class GeocodingMetadata(BaseModel):
     source: Literal["request", "geocoded"]
     formatted_address: str | None = None
     place_id: str | None = None
+
+
+class GeocodeResponse(BaseModel):
+    latitude: float = Field(ge=-90, le=90)
+    longitude: float = Field(ge=-180, le=180)
+    geocoding: GeocodingMetadata
 
 
 class TileSelection(BaseModel):

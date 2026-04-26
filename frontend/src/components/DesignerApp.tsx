@@ -2,8 +2,8 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { AddressIntake } from "./AddressIntake";
 import { Designer } from "./Designer";
+import { HouseTilePicker, type PickedHouseLocation } from "./HouseTilePicker";
 import { ProcessingNarrative } from "./ProcessingNarrative";
-import { RoofPicker } from "./RoofPicker";
 import type { PlacementOverride } from "./RoofPlacedPanels";
 import {
   dimensionsFor,
@@ -15,14 +15,10 @@ import {
 import { buildRecommendationRequest } from "@/lib/recommendationProfile";
 import type { DesignResponse, Profile } from "@/types/api";
 import type {
-  HouseModelMetadata,
+  ProposalResponse,
   RecommendationValidationResponse,
 } from "@/types/recommendation";
-import type {
-  RoofObstruction,
-  RoofGeometryAnalysisResponse,
-  SelectedRoof,
-} from "@/types/roof";
+import type { RoofGeometryAnalysisResponse, SelectedRoof } from "@/types/roof";
 
 const HOUSE_GLB = "/house.glb";
 
@@ -59,12 +55,13 @@ function loadStoredPlacement(): PlacementOverride {
   return DEFAULT_PLACEMENT;
 }
 
-type View = "intake" | "thinking" | "picking-roof" | "selecting-roof" | "designer";
+type View = "intake" | "picking-house" | "thinking" | "designer";
 
 type PendingPayload = {
   design: DesignResponse;
   recommendation: RecommendationValidationResponse | null;
   houseGlbUrl: string | null;
+  roofGeometry: RoofGeometryAnalysisResponse | null;
 };
 
 export default function DesignerApp() {
@@ -73,11 +70,11 @@ export default function DesignerApp() {
   const [response, setResponse] = useState<DesignResponse | null>(null);
   const [recommendation, setRecommendation] =
     useState<RecommendationValidationResponse | null>(null);
+  const [activeProfile, setActiveProfile] = useState<Profile | null>(null);
   const [selectedRoof, setSelectedRoof] = useState<SelectedRoof | null>(null);
-  const [obstructions, setObstructions] = useState<RoofObstruction[]>([]);
   const [roofGeometry, setRoofGeometry] =
     useState<RoofGeometryAnalysisResponse | null>(null);
-  const [roofPickerError, setRoofPickerError] = useState<string | null>(null);
+  const [housePickerError, setHousePickerError] = useState<string | null>(null);
   const [houseGlbUrl, setHouseGlbUrl] = useState<string | null>(null);
   const [catalogPanel, setCatalogPanel] = useState<CatalogComponent | null>(null);
   const [placement, setPlacement] =
@@ -110,18 +107,39 @@ export default function DesignerApp() {
     setView("thinking");
     setPendingPayload(null);
     setRoofGeometry(null);
+    setHousePickerError(null);
+    setSelectedRoof(null);
 
-    // Step 1 + Step 3 can race; Step 2 needs lat/lng.
-    // Step 1: fetch GLB (and lat/lng if not already from Places autocomplete).
-    const houseModelPromise = fetchHouseModel(profile);
+    const latLng = await resolveProfileLatLng(profile);
+    if (!latLng) {
+      setHousePickerError("We couldn't locate that address. Select an autocomplete result or try another address.");
+      setView("intake");
+      return;
+    }
 
-    // Step 3 (still mocked): /api/design for the synthesized BOM.
-    // TODO: when backend ships steps G–K, this entire call disappears and
-    // step 2's response carries the real Design.
+    setActiveProfile({
+      ...profile,
+      latitude: latLng.latitude,
+      longitude: latLng.longitude,
+    });
+    setView("picking-house");
+  }, []);
+
+  const confirmHouseSelection = useCallback(async (picked: PickedHouseLocation) => {
+    if (activeProfile?.latitude == null || activeProfile.longitude == null) {
+      setView("intake");
+      return;
+    }
+
+    setView("thinking");
+    setPendingPayload(null);
+    setRoofGeometry(null);
+    setSelectedRoof(null);
+
     const designPromise: Promise<DesignResponse | null> = fetch("/api/design", {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify(profile),
+      body: JSON.stringify(activeProfile),
     })
       .then((res) => (res.ok ? (res.json() as Promise<DesignResponse>) : null))
       .catch((err) => {
@@ -130,43 +148,42 @@ export default function DesignerApp() {
       });
 
     try {
-      const houseModel = await houseModelPromise;
-      const latLng =
-        profile.latitude != null && profile.longitude != null
-          ? { latitude: profile.latitude, longitude: profile.longitude }
-          : houseModel.latLng;
-
-      // Step 2: real /api/recommendations now that we have lat/lng.
-      let recommendationResponse: RecommendationValidationResponse | null = null;
-      if (latLng) {
-        try {
-          const recRequest = buildRecommendationRequest(
-            profile,
-            latLng,
-            profile.googlePlaceId,
-          );
-          const formData = new FormData();
-          formData.append("request", JSON.stringify(recRequest));
-          const recRes = await fetch("/api/recommendations", {
-            method: "POST",
-            body: formData,
-          });
-          if (recRes.ok) {
-            recommendationResponse =
-              (await recRes.json()) as RecommendationValidationResponse;
-          } else {
-            const detail = await recRes.text();
-            console.error(
-              "[DesignerApp] /api/recommendations failed",
-              recRes.status,
-              detail,
-            );
-          }
-        } catch (err) {
-          console.error("[DesignerApp] /api/recommendations threw:", err);
-        }
+      const recRequest = buildRecommendationRequest(
+        activeProfile,
+        { latitude: activeProfile.latitude, longitude: activeProfile.longitude },
+        activeProfile.googlePlaceId,
+      );
+      const houseModel = await fetchHouseModelBlob(picked);
+      if (!houseModel) {
+        setHousePickerError("We couldn't load the selected 3D model. Try clicking the house again.");
+        setView("picking-house");
+        return;
+      }
+      const formData = new FormData();
+      formData.append(
+        "request",
+        JSON.stringify({
+          project: recRequest,
+          picked_location: {
+            latitude: picked.latitude,
+            longitude: picked.longitude,
+          },
+        }),
+      );
+      formData.append("model_file", houseModel, "selected-house.glb");
+      const proposalRes = await fetch("/api/proposal", {
+        method: "POST",
+        body: formData,
+      });
+      if (!proposalRes.ok) {
+        const detail = await proposalRes.text();
+        console.error("[DesignerApp] /api/proposal failed", proposalRes.status, detail);
+        setHousePickerError("We couldn't analyze that house. Try clicking the roof again.");
+        setView("picking-house");
+        return;
       }
 
+      const proposal = (await proposalRes.json()) as ProposalResponse;
       const designResponse = await designPromise;
       if (!designResponse) {
         setView("intake");
@@ -175,63 +192,16 @@ export default function DesignerApp() {
 
       setPendingPayload({
         design: designResponse,
-        recommendation: recommendationResponse,
-        houseGlbUrl: houseModel.glbUrl,
+        recommendation: proposal.recommendation,
+        houseGlbUrl: modelUrlFromProposal(proposal),
+        roofGeometry: proposal.roof_geometry,
       });
     } catch (err) {
-      console.error("[DesignerApp] handleGenerate failed:", err);
-      setView("intake");
+      console.error("[DesignerApp] proposal flow failed:", err);
+      setHousePickerError("Network hiccup — please try again.");
+      setView("picking-house");
     }
-  }, []);
-
-  const confirmRoofSelection = useCallback(
-    async (
-      satelliteImageUrl: string,
-      selectedIds: string[],
-    ): Promise<boolean> => {
-      setView("selecting-roof");
-      setRoofPickerError(null);
-      try {
-        const geometryRes = await fetch("/api/roof/geometry", {
-          method: "POST",
-          headers: { "content-type": "application/json" },
-          body: JSON.stringify({
-            satellite_image_url: satelliteImageUrl,
-            selected_roof_outline_ids: selectedIds,
-          }),
-        });
-
-        if (!geometryRes.ok) {
-          const detail = await geometryRes.text();
-          console.error(
-            "[DesignerApp] /api/roof/geometry failed",
-            geometryRes.status,
-            detail,
-          );
-          setRoofPickerError(
-            "We couldn't calculate panel placement for that roof — try a different building.",
-          );
-          setView("picking-roof");
-          return false;
-        }
-
-        const geometry =
-          (await geometryRes.json()) as RoofGeometryAnalysisResponse;
-        setRoofGeometry(geometry);
-        setSelectedRoof(geometry.selected_roof);
-        setObstructions([]);
-
-        setView("designer");
-        return true;
-      } catch (err) {
-        console.error("[DesignerApp] roof confirmation threw:", err);
-        setRoofPickerError("Network hiccup — please try again.");
-        setView("picking-roof");
-        return false;
-      }
-    },
-    [],
-  );
+  }, [activeProfile]);
 
   const handleNarrativeDone = useCallback(() => {
     if (!pendingPayload) {
@@ -244,25 +214,8 @@ export default function DesignerApp() {
     if (previousGlbUrl.current) URL.revokeObjectURL(previousGlbUrl.current);
     previousGlbUrl.current = pendingPayload.houseGlbUrl;
     setHouseGlbUrl(pendingPayload.houseGlbUrl);
-
-    // Decide whether the user needs to disambiguate the building.
-    const roofAnalysis = pendingPayload.recommendation?.roof_analysis;
-    const outlines = roofAnalysis?.roof_outlines ?? [];
-    const satellite = roofAnalysis?.satellite_image_url ?? null;
-
-    if (outlines.length >= 1 && satellite) {
-      setSelectedRoof(null);
-      setObstructions([]);
-      setRoofGeometry(null);
-      setRoofPickerError(null);
-      setView("picking-roof");
-      return;
-    }
-
-    // Zero outlines or no satellite image — degrade gracefully and skip the picker.
-    setSelectedRoof(null);
-    setObstructions([]);
-    setRoofGeometry(null);
+    setRoofGeometry(pendingPayload.roofGeometry);
+    setSelectedRoof(pendingPayload.roofGeometry?.selected_roof ?? null);
     setView("designer");
   }, [pendingPayload]);
 
@@ -291,7 +244,7 @@ export default function DesignerApp() {
         onPlacementReset={() => setPlacement(DEFAULT_PLACEMENT)}
         recommendation={recommendation}
         selectedRoof={selectedRoof}
-        obstructions={obstructions}
+        obstructions={[]}
         roofGeometry={roofGeometry}
         onBack={handleBack}
       />
@@ -299,20 +252,18 @@ export default function DesignerApp() {
   }
 
   if (
-    (view === "picking-roof" || view === "selecting-roof") &&
-    recommendation?.roof_analysis &&
-    recommendation.roof_analysis.satellite_image_url
+    view === "picking-house" &&
+    activeProfile?.latitude != null &&
+    activeProfile.longitude != null
   ) {
-    const ra = recommendation.roof_analysis;
     return (
-      <RoofPicker
-        roofAnalysis={ra}
-        address={recommendation.input.address}
-        loading={view === "selecting-roof"}
-        error={roofPickerError}
-        onConfirm={(ids) =>
-          void confirmRoofSelection(ra.satellite_image_url ?? "", ids)
-        }
+      <HouseTilePicker
+        address={activeProfile.address}
+        latitude={activeProfile.latitude}
+        longitude={activeProfile.longitude}
+        loading={false}
+        error={housePickerError}
+        onConfirm={(picked) => void confirmHouseSelection(picked)}
         onBack={handleBack}
       />
     );
@@ -334,55 +285,69 @@ export default function DesignerApp() {
   );
 }
 
-/**
- * Fetch the Photorealistic 3D Tiles GLB for the home from the backend (via
- * the Next proxy). Returns a Blob URL plus the geocoded lat/lng so the caller
- * can fall back to backend-side geocoding when the user typed an address by
- * hand instead of selecting a Google Places result.
- */
-async function fetchHouseModel(profile: Profile): Promise<{
-  glbUrl: string | null;
-  latLng: { latitude: number; longitude: number } | null;
-}> {
-  const body: Record<string, unknown> = { address: profile.address };
+async function resolveProfileLatLng(
+  profile: Profile,
+): Promise<{ latitude: number; longitude: number } | null> {
   if (profile.latitude != null && profile.longitude != null) {
-    body.latitude = profile.latitude;
-    body.longitude = profile.longitude;
+    return { latitude: profile.latitude, longitude: profile.longitude };
   }
+  try {
+    const res = await fetch("/api/location/geocode", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ address: profile.address }),
+    });
+    if (!res.ok) {
+      const detail = await res.text();
+      console.warn("[DesignerApp] /api/location/geocode failed", res.status, detail);
+      return null;
+    }
+    const payload = (await res.json()) as {
+      latitude?: number;
+      longitude?: number;
+    };
+    if (typeof payload.latitude !== "number" || typeof payload.longitude !== "number") {
+      return null;
+    }
+    return { latitude: payload.latitude, longitude: payload.longitude };
+  } catch (err) {
+    console.warn("[DesignerApp] /api/location/geocode threw:", err);
+    return null;
+  }
+}
+
+function modelUrlFromProposal(proposal: ProposalResponse): string | null {
+  const overheadUrl = proposal.recommendation.house_data?.overhead_image_url;
+  const assetId = assetIdFromOverheadUrl(overheadUrl);
+  return assetId ? `/api/house-assets/${assetId}/house.glb` : null;
+}
+
+async function fetchHouseModelBlob(
+  picked: PickedHouseLocation,
+): Promise<Blob | null> {
   try {
     const res = await fetch("/api/location/house-model", {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify(body),
+      body: JSON.stringify({
+        latitude: picked.latitude,
+        longitude: picked.longitude,
+        radius_m: 120,
+      }),
     });
     if (!res.ok) {
       const detail = await res.text();
-      console.warn(
-        "[DesignerApp] /api/location/house-model failed",
-        res.status,
-        detail,
-      );
-      return { glbUrl: null, latLng: null };
+      console.warn("[DesignerApp] /api/location/house-model failed", res.status, detail);
+      return null;
     }
-    const meta = parseRoofeeMetadata(res.headers.get("Roofee-Metadata"));
-    const blob = await res.blob();
-    const url = URL.createObjectURL(blob);
-    const latLng =
-      meta != null
-        ? { latitude: meta.anchor_latitude, longitude: meta.anchor_longitude }
-        : null;
-    return { glbUrl: url, latLng };
+    return await res.blob();
   } catch (err) {
     console.warn("[DesignerApp] /api/location/house-model threw:", err);
-    return { glbUrl: null, latLng: null };
+    return null;
   }
 }
 
-function parseRoofeeMetadata(raw: string | null): HouseModelMetadata | null {
-  if (!raw) return null;
-  try {
-    return JSON.parse(raw) as HouseModelMetadata;
-  } catch {
-    return null;
-  }
+function assetIdFromOverheadUrl(url: string | null | undefined): string | null {
+  const match = url?.match(/^\/api\/house-assets\/([^/]+)\/overhead\.png$/);
+  return match?.[1] ?? null;
 }

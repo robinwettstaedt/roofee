@@ -71,6 +71,24 @@ class Google3DTilesService:
         radius_m: float,
     ) -> tuple[bytes, TileCandidate, int, str | None]:
         """Return (glb_bytes, selected_tile, candidate_count, copyright)."""
+        context = self._collect_candidates(latitude, longitude, radius_m)
+
+        selected_tile = self._pick_best_candidate(context.candidates)
+        return (
+            self._fetch_glb(selected_tile.uri),
+            selected_tile,
+            len(context.candidates),
+            "; ".join(sorted(context.copyrights)) or None,
+        )
+
+    def fetch_selected_glb(self, uri: str) -> bytes:
+        if not self._api_key:
+            raise HTTPException(status_code=503, detail="Google API key is not configured.")
+        if not uri:
+            raise HTTPException(status_code=422, detail="selected tile URI must not be empty.")
+        return self._fetch_glb(self._normalize_selected_glb_uri(uri, self._api_key))
+
+    def _collect_candidates(self, latitude: float, longitude: float, radius_m: float) -> WalkContext:
         if not self._api_key:
             raise HTTPException(status_code=503, detail="Google API key is not configured.")
         if radius_m <= 0:
@@ -102,14 +120,7 @@ class Google3DTilesService:
                 status_code=404,
                 detail="No 3D tiles intersected the requested radius around the anchor.",
             )
-
-        selected_tile = self._pick_best_candidate(context.candidates)
-        return (
-            self._fetch_glb(selected_tile.uri),
-            selected_tile,
-            len(context.candidates),
-            "; ".join(sorted(context.copyrights)) or None,
-        )
+        return context
 
     def _walk(
         self,
@@ -259,6 +270,23 @@ class Google3DTilesService:
         params = dict(parse_qsl(parsed.query, keep_blank_values=True))
         params["key"] = api_key
         return urlunparse(parsed._replace(query=urlencode(params)))
+
+    def _normalize_selected_glb_uri(self, uri: str, api_key: str) -> str:
+        parsed = urlparse(uri)
+        if parsed.scheme or parsed.netloc:
+            if parsed.scheme != "https" or parsed.netloc != "tile.googleapis.com":
+                raise HTTPException(status_code=400, detail="Invalid selected Google 3D tile URI.")
+            return self._with_api_key(uri, api_key)
+
+        normalized = uri.lstrip("/")
+        if normalized.startswith("api/google-3d-tiles/"):
+            normalized = normalized.removeprefix("api/google-3d-tiles/")
+        if normalized.startswith("v1/3dtiles/"):
+            normalized = normalized.removeprefix("v1/3dtiles/")
+        if ".." in normalized.split("/") or "\\" in normalized:
+            raise HTTPException(status_code=400, detail="Invalid selected Google 3D tile URI.")
+        base = "https://tile.googleapis.com/v1/3dtiles/"
+        return self._with_api_key(urljoin(base, normalized), api_key)
 
     @staticmethod
     def _looks_like_tileset(url: str) -> bool:

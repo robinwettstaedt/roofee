@@ -1,7 +1,7 @@
 // Mirror of backend/app/models/recommendation.py — keep in sync.
 // String literal unions stand in for the backend StrEnums.
 
-import type { RoofAnalysis } from "./roof";
+import type { RoofAnalysis, RoofGeometryAnalysisResponse } from "./roof";
 
 export type RecommendationGoal =
   | "balanced"
@@ -166,6 +166,28 @@ export type RecommendationValidationResponse = {
   solar_weather?: SolarWeatherMetadata | null;
   house_data?: HouseData | null;
   roof_analysis?: RoofAnalysis | null;
+};
+
+export type SelectedGoogle3DTile = {
+  uri?: string | null;
+  geometric_error?: number | null;
+  transform?: number[];
+};
+
+export type ProposalRequest = {
+  project: RecommendationRequest;
+  picked_location: LatLng;
+  selected_tile?: SelectedGoogle3DTile | null;
+  model_radius_m?: number;
+  roof_edge_setback_m?: number;
+  obstruction_buffer_m?: number;
+};
+
+export type ProposalResponse = {
+  status: string;
+  recommendation: RecommendationValidationResponse;
+  roof_geometry: RoofGeometryAnalysisResponse;
+  warnings: string[];
 };
 
 // Metadata from POST /api/location/house-model — emitted in `Roofee-Metadata`

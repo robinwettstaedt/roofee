@@ -134,8 +134,8 @@ export function RoofPicker({
     if (!imgSize || outlines.length === 0) return;
     const id = pickInitialId(outlines, imgSize.w, imgSize.h);
     if (id) {
-      setSelectedIds(new Set([id]));
       didPreselect.current = true;
+      window.setTimeout(() => setSelectedIds(new Set([id])), 0);
     }
   }, [imgSize, outlines]);
 

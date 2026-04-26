@@ -4,6 +4,7 @@ from typing import Any
 from pydantic import BaseModel, ConfigDict, Field
 
 from app.models.roof import RoofAnalysis
+from app.models.roof import RoofGeometryAnalysisResponse
 
 
 class RecommendationGoal(StrEnum):
@@ -180,3 +181,27 @@ class RecommendationValidationResponse(BaseModel):
     solar_weather: SolarWeatherMetadata | None = None
     house_data: HouseData | None = None
     roof_analysis: RoofAnalysis | None = None
+
+
+class SelectedGoogle3DTile(BaseModel):
+    uri: str | None = None
+    geometric_error: float | None = Field(default=None, ge=0)
+    transform: list[float] = Field(default_factory=list)
+
+
+class ProposalRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    project: RecommendationRequest
+    picked_location: LatLng
+    selected_tile: SelectedGoogle3DTile | None = None
+    model_radius_m: float = Field(default=50.0, gt=0, le=200)
+    roof_edge_setback_m: float = Field(default=0.35, ge=0)
+    obstruction_buffer_m: float = Field(default=0.25, ge=0)
+
+
+class ProposalResponse(BaseModel):
+    status: str
+    recommendation: RecommendationValidationResponse
+    roof_geometry: RoofGeometryAnalysisResponse
+    warnings: list[str] = Field(default_factory=list)
