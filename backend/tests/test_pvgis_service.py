@@ -3,7 +3,7 @@ import pytest
 from fastapi import HTTPException
 
 from app.services import pvgis_service
-from app.services.pvgis_service import PVGIS_MRCALC_URL, PvgisService
+from app.services.pvgis_service import PVGIS_MRCALC_URL, PvgisService, _pvgis_aspect_from_roof_azimuth
 
 
 def monthly_rows() -> list[dict[str, float | int]]:
@@ -125,3 +125,18 @@ def test_fetch_solar_weather_returns_502_for_non_200(monkeypatch: pytest.MonkeyP
 
     assert exc.value.status_code == 502
     assert exc.value.detail == "PVGIS returned HTTP 503."
+
+
+def test_parse_annual_pv_yield_per_kwp() -> None:
+    yield_per_kwp = PvgisService().parse_annual_pv_yield_per_kwp(
+        {"outputs": {"totals": {"fixed": {"E_y": 957.42}}}}
+    )
+
+    assert yield_per_kwp == 957.42
+
+
+def test_pvgis_aspect_converts_roof_azimuth_to_south_zero_convention() -> None:
+    assert _pvgis_aspect_from_roof_azimuth(180) == 0
+    assert _pvgis_aspect_from_roof_azimuth(90) == -90
+    assert _pvgis_aspect_from_roof_azimuth(270) == 90
+    assert _pvgis_aspect_from_roof_azimuth(0) == -180

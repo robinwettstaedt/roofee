@@ -21,6 +21,7 @@ from app.services.model.model_geometry_service import ModelGeometryService, get_
 from app.services.roof.obstruction_service import RoofObstructionService, get_roof_obstruction_service
 from app.services.roof.registration_service import RoofRegistrationService, get_roof_registration_service
 from app.services.roof.roof_analysis_service import RoofAnalysisService, get_roof_analysis_service
+from app.services.roof.solar_layout_service import SolarLayoutService, get_solar_layout_service
 from app.services.roof.usable_geometry_service import (
     UsableRoofGeometryService,
     get_usable_roof_geometry_service,
@@ -37,6 +38,7 @@ class RoofGeometryPipelineService:
         model_asset_service: ModelAssetService,
         model_geometry_service: ModelGeometryService,
         usable_geometry_service: UsableRoofGeometryService,
+        solar_layout_service: SolarLayoutService,
     ) -> None:
         self.roof_analysis_service = roof_analysis_service
         self.obstruction_service = obstruction_service
@@ -44,6 +46,7 @@ class RoofGeometryPipelineService:
         self.model_asset_service = model_asset_service
         self.model_geometry_service = model_geometry_service
         self.usable_geometry_service = usable_geometry_service
+        self.solar_layout_service = solar_layout_service
 
     def analyze_geometry(
         self,
@@ -112,6 +115,18 @@ class RoofGeometryPipelineService:
             obstruction_buffer_m=request.obstruction_buffer_m,
         )
         warnings.extend(usable_warnings)
+        project_context = self._project_context(asset_id, house_data_service)
+        solar_layout_options, recommended_layout_option_id, layout_warnings = (
+            self.solar_layout_service.build_layout_options(
+                roof_planes=roof_planes,
+                usable_regions=usable_regions,
+                metadata=loaded_model.render_metadata,
+                latitude=project_context.get("latitude"),
+                longitude=project_context.get("longitude"),
+                annual_demand_kwh=project_context.get("annual_electricity_demand_kwh"),
+            )
+        )
+        warnings.extend(layout_warnings)
 
         return RoofGeometryAnalysisResponse(
             status="analyzed" if roof_planes else "partial",
@@ -122,9 +137,44 @@ class RoofGeometryPipelineService:
             roof_planes=roof_planes,
             usable_regions=usable_regions,
             removed_areas=removed_areas,
+            solar_layout_options=solar_layout_options,
+            recommended_layout_option_id=recommended_layout_option_id,
             render_metadata=loaded_model.render_metadata,
             warnings=warnings,
         )
+
+    def _project_context(
+        self,
+        asset_id: str,
+        house_data_service: HouseDataService,
+    ) -> dict[str, float]:
+        metadata = house_data_service.house_asset_metadata(asset_id)
+        raw_context = metadata.get("project_context")
+        context = raw_context if isinstance(raw_context, dict) else {}
+        requested_location = metadata.get("requested_location")
+        if isinstance(requested_location, dict):
+            context = {
+                "latitude": requested_location.get("latitude"),
+                "longitude": requested_location.get("longitude"),
+                **context,
+            }
+        return {
+            key: value
+            for key, value in {
+                "latitude": self._optional_float(context.get("latitude")),
+                "longitude": self._optional_float(context.get("longitude")),
+                "annual_electricity_demand_kwh": self._optional_float(
+                    context.get("annual_electricity_demand_kwh")
+                ),
+            }.items()
+            if value is not None
+        }
+
+    def _optional_float(self, value: object) -> float | None:
+        try:
+            return float(value)
+        except (TypeError, ValueError):
+            return None
 
     def _mapped_obstruction(
         self,
@@ -160,4 +210,5 @@ def get_roof_geometry_pipeline_service() -> RoofGeometryPipelineService:
         model_asset_service=get_model_asset_service(),
         model_geometry_service=get_model_geometry_service(),
         usable_geometry_service=get_usable_roof_geometry_service(),
+        solar_layout_service=get_solar_layout_service(),
     )

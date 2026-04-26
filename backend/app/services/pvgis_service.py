@@ -10,6 +10,7 @@ from app.models.recommendation import MonthlySolarWeather, SolarWeatherMetadata
 
 PVGIS_API_VERSION = "5.3"
 PVGIS_MRCALC_URL = f"https://re.jrc.ec.europa.eu/api/v{PVGIS_API_VERSION.replace('.', '_')}/MRcalc"
+PVGIS_PVCALC_URL = f"https://re.jrc.ec.europa.eu/api/v{PVGIS_API_VERSION.replace('.', '_')}/PVcalc"
 PVGIS_TIMEOUT_SECONDS = 10.0
 
 
@@ -30,6 +31,34 @@ class PvgisService:
             raise HTTPException(status_code=502, detail="PVGIS request failed.") from exc
 
         return self.parse_solar_weather(payload, latitude, longitude, params)
+
+    def fetch_annual_pv_yield_per_kwp(
+        self,
+        *,
+        latitude: float,
+        longitude: float,
+        tilt_degrees: float,
+        azimuth_degrees: float,
+    ) -> float:
+        params = self._pvcalc_request_params(
+            latitude=latitude,
+            longitude=longitude,
+            tilt_degrees=tilt_degrees,
+            azimuth_degrees=azimuth_degrees,
+        )
+        try:
+            response = httpx.get(PVGIS_PVCALC_URL, params=params, timeout=PVGIS_TIMEOUT_SECONDS)
+            response.raise_for_status()
+            payload = response.json()
+        except httpx.TimeoutException as exc:
+            raise HTTPException(status_code=502, detail="PVGIS PV yield request timed out.") from exc
+        except httpx.HTTPStatusError as exc:
+            status_code = exc.response.status_code
+            raise HTTPException(status_code=502, detail=f"PVGIS PV yield returned HTTP {status_code}.") from exc
+        except (httpx.HTTPError, ValueError) as exc:
+            raise HTTPException(status_code=502, detail="PVGIS PV yield request failed.") from exc
+
+        return self.parse_annual_pv_yield_per_kwp(payload)
 
     def parse_solar_weather(
         self,
@@ -65,6 +94,15 @@ class PvgisService:
             monthly=monthly,
         )
 
+    def parse_annual_pv_yield_per_kwp(self, payload: dict[str, Any]) -> float:
+        try:
+            annual_yield = float(payload["outputs"]["totals"]["fixed"]["E_y"])
+        except (KeyError, TypeError, ValueError) as exc:
+            raise HTTPException(status_code=502, detail="PVGIS returned malformed PV yield data.") from exc
+        if annual_yield < 0:
+            raise HTTPException(status_code=502, detail="PVGIS returned malformed PV yield data.")
+        return round(annual_yield, 2)
+
     def _request_params(self, latitude: float, longitude: float) -> dict[str, str | float | int]:
         return {
             "lat": latitude,
@@ -72,6 +110,24 @@ class PvgisService:
             "horirrad": 1,
             "optrad": 1,
             "avtemp": 1,
+            "outputformat": "json",
+        }
+
+    def _pvcalc_request_params(
+        self,
+        *,
+        latitude: float,
+        longitude: float,
+        tilt_degrees: float,
+        azimuth_degrees: float,
+    ) -> dict[str, str | float | int]:
+        return {
+            "lat": latitude,
+            "lon": longitude,
+            "peakpower": 1,
+            "loss": 14,
+            "angle": round(max(0.0, min(float(tilt_degrees), 90.0)), 2),
+            "aspect": round(_pvgis_aspect_from_roof_azimuth(azimuth_degrees), 2),
             "outputformat": "json",
         }
 
@@ -102,6 +158,10 @@ class PvgisService:
             )
             for month, values in sorted(by_month.items())
         ]
+
+
+def _pvgis_aspect_from_roof_azimuth(azimuth_degrees: float) -> float:
+    return ((float(azimuth_degrees) - 180.0 + 180.0) % 360.0) - 180.0
 
 
 def get_pvgis_service() -> PvgisService:

@@ -29,8 +29,8 @@ sequenceDiagram
     Backend->>Backend: ✅ Load or fetch the project GLB and render it top-down
     Backend->>Backend: ✅ Register satellite roof polygons to the backend 3D render
     Backend->>Backend: ✅ Extract roof planes and usable regions
-    Backend->>Backend: Check where panels can fit
-    Backend->>Backend: Create good, better, and best options
+    Backend->>Backend: ✅ Check where panels can fit
+    Backend->>Backend: ✅ Create good, better, and best options
     Backend->>Backend: Create the BOM
     Backend->>Backend: Prepare the roof visual
     Backend-->>Frontend: Return proposal, BOM, warnings, and panel placement
@@ -338,7 +338,7 @@ sequenceDiagram
    }
    ```
 
-   The backend loads or fetches the cached Google 3D Tiles GLB for the same house asset, generates its own deterministic top-down render, registers the selected satellite roof polygons, extracts roof planes from mesh normals, maps obstructions into model coordinates, and subtracts setbacks/obstruction buffers with Shapely. The response includes `roof_planes`, `mapped_obstructions`, `usable_regions`, and `removed_areas`; panel layout and BOM generation must consume those feasible regions instead of raw roof area.
+   The backend loads or fetches the cached Google 3D Tiles GLB for the same house asset, generates its own deterministic top-down render, registers the selected satellite roof polygons, extracts roof planes from mesh normals, maps obstructions into model coordinates, subtracts setbacks/obstruction buffers with Shapely, and creates deterministic solar layout options. The response includes `roof_planes`, `mapped_obstructions`, `usable_regions`, `removed_areas`, and `solar_layout_options`; BOM generation must consume those feasible regions and selected panel layouts instead of raw roof area.
 
 3. **Upload optional 3D model**
    - The user may optionally upload a 3D model at the start.
@@ -374,9 +374,11 @@ sequenceDiagram
    ✅ Implemented: `POST /api/roof/geometry` returns roof planes, mapped obstructions, usable regions, removed areas, and warnings. The geometry uses model-local `x/z` coordinates for V1, with `y` as the up axis.
 
 8. **Find possible solar layouts**
-   - The backend looks at the available solar modules in the material catalog.
+   - The backend uses backend-owned real PV module presets with known dimensions for V1 layout.
    - It checks which modules can physically fit on the usable roof area.
    - This step decides realistic panel counts and roof-plane placement options before any bill of materials is created.
+
+   ✅ Implemented: V1 uses three backend-owned real Sunpro module presets with known physical dimensions, ranks usable roof planes by sun-facing suitability, packs rectangular panels into usable regions while respecting edge setbacks and obstruction subtraction, and returns `good`, `better`, and `best` layout options from `POST /api/roof/geometry`. When project demand and coordinates are available from the earlier `/api/recommendations` call, layout options include annual demand coverage and PVGIS annual production estimates per roof plane. If PVGIS yield lookup is unavailable, the backend still returns physically feasible layouts with warnings instead of fake yield values.
 
 9. **Size the energy system**
    - The backend estimates sensible `good`, `better`, and `best` system options.
@@ -454,18 +456,18 @@ The backend is organized around service responsibilities rather than one large c
 
 - `RoofGeometryPipelineService`
   - Orchestrates the post-selection backend geometry flow behind `POST /api/roof/geometry`.
-  - Coordinates selected roof validation, obstruction detection, GLB loading, backend rendering, registration, roof-plane extraction, and usable-region subtraction.
+  - Coordinates selected roof validation, obstruction detection, GLB loading, backend rendering, registration, roof-plane extraction, usable-region subtraction, and solar layout generation.
 
 - `UsableRoofGeometryService`
   - Subtracts roof-edge setbacks and buffered obstructions from each extracted roof plane with Shapely.
   - Returns split usable regions and traceable removed areas.
 
-Planned services that are referenced by the product flow but not implemented yet:
-
 - `SolarLayoutService`
-  - Takes usable roof geometry and candidate PV modules from the catalog.
+  - Takes usable roof geometry and real V1 module presets with known physical dimensions.
   - Calculates how many panels can physically fit and where they can go.
-  - Produces feasible layouts that downstream sizing and BOM logic must respect.
+  - Produces feasible `good`, `better`, and `best` layouts with traceable panel placements and PVGIS-backed annual yield estimates when location data is available.
+
+Planned services that are referenced by the product flow but not implemented yet:
 
 - `EnergySizingService`
   - Orchestrates the `good`, `better`, and `best` recommendations.
@@ -510,7 +512,7 @@ app/services/
     registration_service.py
     geometry_pipeline_service.py
     usable_geometry_service.py
-    solar_layout_service.py           # planned
+    solar_layout_service.py
   sizing/
     energy_sizing_service.py          # planned
     pv_sizing_service.py              # planned
