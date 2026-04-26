@@ -96,6 +96,7 @@ class ModelGeometryService:
                 triangles,
                 face_normals,
                 face_areas,
+                centroids,
                 metadata,
                 plane_id=f"roof-plane-{len(planes) + 1:03d}",
             )
@@ -261,6 +262,7 @@ class ModelGeometryService:
         triangles: np.ndarray,
         face_normals: np.ndarray,
         face_areas: np.ndarray,
+        centroids: np.ndarray,
         metadata: TopDownRenderMetadata,
         *,
         plane_id: str,
@@ -273,6 +275,8 @@ class ModelGeometryService:
         normal = normal / normal_length
         if normal[1] < 0:
             normal = -normal
+        centroid = np.average(centroids[cluster], axis=0, weights=weights)
+        plane_offset = float(np.dot(normal, centroid))
 
         footprint = self._cluster_footprint(triangles[cluster])
         if footprint is None or footprint.is_empty:
@@ -285,6 +289,8 @@ class ModelGeometryService:
         return RoofPlaneGeometry(
             id=plane_id,
             normal=[round(float(value), 5) for value in normal],
+            plane_offset=round(plane_offset, 5),
+            centroid_model=[round(float(value), 4) for value in centroid],
             tilt_degrees=round(tilt, 2),
             azimuth_degrees=round(azimuth, 2),
             surface_area_m2=round(float(weights.sum()), 3),

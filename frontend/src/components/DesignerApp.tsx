@@ -20,8 +20,7 @@ import type {
 } from "@/types/recommendation";
 import type {
   RoofObstruction,
-  RoofObstructionAnalysis,
-  RoofSelectionResponse,
+  RoofGeometryAnalysisResponse,
   SelectedRoof,
 } from "@/types/roof";
 
@@ -76,15 +75,14 @@ export default function DesignerApp() {
     useState<RecommendationValidationResponse | null>(null);
   const [selectedRoof, setSelectedRoof] = useState<SelectedRoof | null>(null);
   const [obstructions, setObstructions] = useState<RoofObstruction[]>([]);
+  const [roofGeometry, setRoofGeometry] =
+    useState<RoofGeometryAnalysisResponse | null>(null);
   const [roofPickerError, setRoofPickerError] = useState<string | null>(null);
   const [houseGlbUrl, setHouseGlbUrl] = useState<string | null>(null);
   const [catalogPanel, setCatalogPanel] = useState<CatalogComponent | null>(null);
-  const [placement, setPlacement] = useState<PlacementOverride>(DEFAULT_PLACEMENT);
+  const [placement, setPlacement] =
+    useState<PlacementOverride>(loadStoredPlacement);
   const previousGlbUrl = useRef<string | null>(null);
-
-  useEffect(() => {
-    setPlacement(loadStoredPlacement());
-  }, []);
 
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -111,6 +109,7 @@ export default function DesignerApp() {
   const handleGenerate = useCallback(async (profile: Profile) => {
     setView("thinking");
     setPendingPayload(null);
+    setRoofGeometry(null);
 
     // Step 1 + Step 3 can race; Step 2 needs lat/lng.
     // Step 1: fetch GLB (and lat/lng if not already from Places autocomplete).
@@ -193,54 +192,34 @@ export default function DesignerApp() {
       setView("selecting-roof");
       setRoofPickerError(null);
       try {
-        const [selectionRes, obstructionsRes] = await Promise.all([
-          fetch("/api/roof/selection", {
-            method: "POST",
-            headers: { "content-type": "application/json" },
-            body: JSON.stringify({
-              satellite_image_url: satelliteImageUrl,
-              selected_roof_outline_ids: selectedIds,
-            }),
+        const geometryRes = await fetch("/api/roof/geometry", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({
+            satellite_image_url: satelliteImageUrl,
+            selected_roof_outline_ids: selectedIds,
           }),
-          fetch("/api/roof/obstructions", {
-            method: "POST",
-            headers: { "content-type": "application/json" },
-            body: JSON.stringify({
-              satellite_image_url: satelliteImageUrl,
-              selected_roof_outline_ids: selectedIds,
-            }),
-          }),
-        ]);
+        });
 
-        if (!selectionRes.ok) {
-          const detail = await selectionRes.text();
+        if (!geometryRes.ok) {
+          const detail = await geometryRes.text();
           console.error(
-            "[DesignerApp] /api/roof/selection failed",
-            selectionRes.status,
+            "[DesignerApp] /api/roof/geometry failed",
+            geometryRes.status,
             detail,
           );
           setRoofPickerError(
-            "We couldn't lock in that selection — try a different building.",
+            "We couldn't calculate panel placement for that roof — try a different building.",
           );
           setView("picking-roof");
           return false;
         }
 
-        const selection = (await selectionRes.json()) as RoofSelectionResponse;
-        setSelectedRoof(selection.selected_roof);
-
-        if (obstructionsRes.ok) {
-          const obs = (await obstructionsRes.json()) as RoofObstructionAnalysis;
-          setObstructions(obs.obstructions);
-        } else {
-          // Obstruction analysis is best-effort; absence shouldn't block flow.
-          setObstructions([]);
-          console.warn(
-            "[DesignerApp] /api/roof/obstructions failed:",
-            obstructionsRes.status,
-            await obstructionsRes.text(),
-          );
-        }
+        const geometry =
+          (await geometryRes.json()) as RoofGeometryAnalysisResponse;
+        setRoofGeometry(geometry);
+        setSelectedRoof(geometry.selected_roof);
+        setObstructions([]);
 
         setView("designer");
         return true;
@@ -274,6 +253,7 @@ export default function DesignerApp() {
     if (outlines.length >= 1 && satellite) {
       setSelectedRoof(null);
       setObstructions([]);
+      setRoofGeometry(null);
       setRoofPickerError(null);
       setView("picking-roof");
       return;
@@ -282,8 +262,9 @@ export default function DesignerApp() {
     // Zero outlines or no satellite image — degrade gracefully and skip the picker.
     setSelectedRoof(null);
     setObstructions([]);
+    setRoofGeometry(null);
     setView("designer");
-  }, [pendingPayload, confirmRoofSelection]);
+  }, [pendingPayload]);
 
   // Clean up the Blob URL on unmount so we don't leak memory.
   useEffect(() => {
@@ -311,6 +292,7 @@ export default function DesignerApp() {
         recommendation={recommendation}
         selectedRoof={selectedRoof}
         obstructions={obstructions}
+        roofGeometry={roofGeometry}
         onBack={handleBack}
       />
     );

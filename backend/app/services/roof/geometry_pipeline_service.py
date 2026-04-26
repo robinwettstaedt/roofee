@@ -18,6 +18,7 @@ from app.services.house_data_service import HouseDataService
 from app.services.location.google_3d_tiles_service import Google3DTilesService
 from app.services.model.model_asset_service import ModelAssetService, get_model_asset_service
 from app.services.model.model_geometry_service import ModelGeometryService, get_model_geometry_service
+from app.services.model.panel_placement_service import PanelPlacementService, get_panel_placement_service
 from app.services.roof.obstruction_service import RoofObstructionService, get_roof_obstruction_service
 from app.services.roof.registration_service import RoofRegistrationService, get_roof_registration_service
 from app.services.roof.roof_analysis_service import RoofAnalysisService, get_roof_analysis_service
@@ -38,6 +39,7 @@ class RoofGeometryPipelineService:
         registration_service: RoofRegistrationService,
         model_asset_service: ModelAssetService,
         model_geometry_service: ModelGeometryService,
+        panel_placement_service: PanelPlacementService,
         usable_geometry_service: UsableRoofGeometryService,
         solar_layout_service: SolarLayoutService,
         energy_sizing_service: EnergySizingService,
@@ -47,6 +49,7 @@ class RoofGeometryPipelineService:
         self.registration_service = registration_service
         self.model_asset_service = model_asset_service
         self.model_geometry_service = model_geometry_service
+        self.panel_placement_service = panel_placement_service
         self.usable_geometry_service = usable_geometry_service
         self.solar_layout_service = solar_layout_service
         self.energy_sizing_service = energy_sizing_service
@@ -130,6 +133,11 @@ class RoofGeometryPipelineService:
             )
         )
         warnings.extend(layout_warnings)
+        solar_layout_options, placement_warnings = self.panel_placement_service.enrich_layout_options(
+            layouts=solar_layout_options,
+            roof_planes=roof_planes,
+        )
+        warnings.extend(placement_warnings)
         system_options, system_warnings = self.energy_sizing_service.build_system_options(
             layouts=solar_layout_options,
             project_context=project_context,
@@ -221,6 +229,7 @@ def get_roof_geometry_pipeline_service() -> RoofGeometryPipelineService:
         registration_service=get_roof_registration_service(),
         model_asset_service=get_model_asset_service(),
         model_geometry_service=get_model_geometry_service(),
+        panel_placement_service=get_panel_placement_service(),
         usable_geometry_service=get_usable_roof_geometry_service(),
         solar_layout_service=get_solar_layout_service(),
         energy_sizing_service=get_energy_sizing_service(),

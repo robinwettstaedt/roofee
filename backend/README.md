@@ -32,7 +32,7 @@ sequenceDiagram
     Backend->>Backend: ✅ Check where panels can fit
     Backend->>Backend: ✅ Create good, better, and best options
     Backend->>Backend: ✅ Create the BOM
-    Backend->>Backend: Prepare the roof visual
+    Backend->>Backend: ✅ Prepare the roof visual
     Backend-->>Frontend: Return proposal, BOM, warnings, and panel placement
     Frontend->>Frontend: Show proposal, BOM, warnings, and panel placement
 ```
@@ -397,6 +397,8 @@ sequenceDiagram
    - The backend maps the selected panel layout back onto the best available roof geometry.
    - The frontend can then show the seller and customer where the proposed panels would actually go.
 
+   ✅ Implemented: `POST /api/roof/geometry` enriches each feasible panel placement with 3D roof-surface corners, lifted center points, roof normals, render axes, panel thickness, and clearance. The frontend calls the backend-owned geometry flow after roof selection and renders the recommended layout directly on the loaded house model, falling back to the manual/demo placement only when backend placement data is unavailable.
+
 The important rule is that the BOM should not invent a system. Physical roof fit and sizing decisions happen first; the BOM translates those decisions into real catalog components and quantities.
 
 ## Backend architecture
@@ -432,6 +434,11 @@ The backend is organized around service responsibilities rather than one large c
   - Parses GLB mesh geometry with `trimesh`.
   - Generates a deterministic backend top-down render and render metadata.
   - Extracts roof planes by filtering upward faces inside the selected roof footprint and clustering connected faces by normal/plane offset.
+
+- `PanelPlacementService`
+  - Converts feasible 2D panel footprints into frontend-renderable 3D poses.
+  - Uses each roof plane equation to lift panel corners onto the exact roof surface.
+  - Returns panel centers, normals, axes, thickness, and clearance while preserving the original footprint polygons for traceability.
 
 - `ProjectInputService`
   - Handles the start form where the user enters mandatory and optional inputs.
@@ -492,11 +499,6 @@ Planned services that are referenced by the product flow but not implemented yet
 
 - `PvSizingService`
   - Uses feasible solar layouts, customer demand, roof orientation, and PV yield data to choose target PV sizes when layouts need more strategy variants than the current good/better/best presets.
-
-- `PanelPlacementService`
-  - Converts the selected solar layout into frontend-renderable geometry on the best available roof representation.
-  - Uses the backend-owned roof geometry from `POST /api/roof/geometry`.
-  - This is separate from BOM generation because visual placement is about geometry, not materials.
 
 Suggested mature service layout:
 

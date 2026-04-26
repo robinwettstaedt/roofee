@@ -6,6 +6,7 @@ from app.models.catalog import ComponentCategory, ComponentKind
 from app.models.roof import (
     BoundingBoxPixels,
     OrthographicWorldBounds,
+    PanelPlacement,
     RegistrationQualityMetrics,
     RoofGeometryAnalysisRequest,
     RoofGeometryAnalysisResponse,
@@ -72,6 +73,23 @@ class FakeRoofGeometryPipelineService:
                     estimated_annual_production_kwh=5200,
                     annual_demand_kwh=5000,
                     demand_coverage_ratio=1.04,
+                    panel_placements=[
+                        PanelPlacement(
+                            id="panel-001",
+                            roof_plane_id="roof-plane-001",
+                            usable_region_id="usable-region-001",
+                            orientation="portrait",
+                            model_polygon=[[1, 1], [3, 1], [3, 2], [1, 2]],
+                            render_polygon_pixels=[[10, 90], [30, 90], [30, 80], [10, 80]],
+                            surface_polygon_3d=[[1, 6, 1], [3, 6, 1], [3, 6, 2], [1, 6, 2]],
+                            center_model=[2, 6.05, 1.5],
+                            normal_model=[0, 1, 0],
+                            length_axis_model=[1, 0, 0],
+                            width_axis_model=[0, 0, 1],
+                            clearance_m=0.035,
+                            thickness_m=0.03,
+                        )
+                    ],
                 )
             ],
             recommended_layout_option_id="better",
@@ -133,6 +151,10 @@ def test_roof_geometry_route_runs_from_selected_roof_ids_without_frontend_render
     assert payload["registration"]["status"] == "registered"
     assert payload["recommended_layout_option_id"] == "better"
     assert payload["solar_layout_options"][0]["module"]["id"] == "standard"
+    placement = payload["solar_layout_options"][0]["panel_placements"][0]
+    assert placement["surface_polygon_3d"] == [[1, 6, 1], [3, 6, 1], [3, 6, 2], [1, 6, 2]]
+    assert placement["center_model"] == [2, 6.05, 1.5]
+    assert placement["normal_model"] == [0, 1, 0]
     assert payload["system_options"][0]["layout_option_id"] == "better"
     assert payload["system_options"][0]["bom"][0]["source"] == "panel_preset"
 

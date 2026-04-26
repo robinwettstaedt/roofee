@@ -19,6 +19,10 @@ import {
 import { House } from "./House";
 import { RoofPlacedPanels, type PlacementOverride } from "./RoofPlacedPanels";
 import { DEFAULT_PANEL, type PanelDimensions } from "@/lib/catalog";
+import type {
+  PanelPlacement as BackendPanelPlacement,
+  SolarModulePreset,
+} from "@/types/roof";
 
 function Loader() {
   const { progress } = useProgress();
@@ -34,11 +38,15 @@ export function Scene({
   panel = DEFAULT_PANEL,
   modelUrl,
   placementOverride,
+  backendPlacements,
+  backendModule,
 }: {
   panelCount: number;
   panel?: PanelDimensions;
   modelUrl: string;
   placementOverride?: PlacementOverride;
+  backendPlacements?: BackendPanelPlacement[];
+  backendModule?: SolarModulePreset | null;
 }) {
   const [houseRoot, setHouseRoot] = useState<THREE.Object3D | null>(null);
 
@@ -58,6 +66,8 @@ export function Scene({
             panelCount={panelCount}
             panel={panel}
             override={placementOverride}
+            backendPlacements={backendPlacements}
+            backendModule={backendModule}
           />
         )}
         <Environment preset="sunset" />

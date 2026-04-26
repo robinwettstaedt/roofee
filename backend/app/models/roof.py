@@ -155,6 +155,8 @@ class MappedRoofObstruction(BaseModel):
 class RoofPlaneGeometry(BaseModel):
     id: str
     normal: list[float]
+    plane_offset: float = 0
+    centroid_model: list[float] = Field(default_factory=list)
     tilt_degrees: float = Field(ge=0, le=90)
     azimuth_degrees: float = Field(ge=0, lt=360)
     surface_area_m2: float = Field(ge=0)
@@ -202,6 +204,13 @@ class PanelPlacement(BaseModel):
     orientation: str
     model_polygon: list[list[float]]
     render_polygon_pixels: list[list[int]]
+    surface_polygon_3d: list[list[float]] = Field(default_factory=list)
+    center_model: list[float] = Field(default_factory=list)
+    normal_model: list[float] = Field(default_factory=list)
+    length_axis_model: list[float] = Field(default_factory=list)
+    width_axis_model: list[float] = Field(default_factory=list)
+    clearance_m: float = Field(default=0, ge=0)
+    thickness_m: float = Field(default=0, ge=0)
 
 
 class SolarLayoutOption(BaseModel):
