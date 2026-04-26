@@ -6,6 +6,7 @@ import { buildVariants, variantFor, type VariantId } from "@/lib/variants";
 import { eur } from "@/lib/format";
 import { annualGenerationFromPvgis } from "@/lib/realGeneration";
 import type { RecommendationValidationResponse } from "@/types/recommendation";
+import type { RoofObstruction, SelectedRoof } from "@/types/roof";
 import { BomSidebar } from "./BomSidebar";
 import { CanvasOverlays, type Note } from "./CanvasOverlays";
 import { PlacementControls } from "./PlacementControls";
@@ -26,6 +27,8 @@ export function Designer({
   onPlacementChange,
   onPlacementReset,
   recommendation,
+  selectedRoof,
+  obstructions,
   onBack,
 }: {
   response: DesignResponse;
@@ -36,6 +39,8 @@ export function Designer({
   onPlacementChange: (p: PlacementOverride) => void;
   onPlacementReset: () => void;
   recommendation: RecommendationValidationResponse | null;
+  selectedRoof: SelectedRoof | null;
+  obstructions: RoofObstruction[];
   onBack: () => void;
 }) {
   const variants = useMemo(() => buildVariants(baseDesign), [baseDesign]);
@@ -148,6 +153,8 @@ export function Designer({
               }
               lat={realLatLng?.latitude ?? response.location.latLng.lat}
               lng={realLatLng?.longitude ?? response.location.latLng.lng}
+              selectedRoofAreaPixels={selectedRoof?.area_pixels ?? null}
+              obstructionCount={obstructions.length}
             />
           )}
 
