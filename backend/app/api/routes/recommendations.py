@@ -28,4 +28,17 @@ def create_recommendation(
         response.input.longitude,
     )
     response.roof_analysis = roof_analysis_service.analyze_house(response.house_data, house_data_service)
+    asset_id = roof_analysis_service.asset_id_from_overhead_url(response.house_data.overhead_image_url)
+    if asset_id is not None:
+        house_data_service.update_house_asset_metadata(
+            asset_id,
+            {
+                "project_context": {
+                    "annual_electricity_demand_kwh": response.input.annual_electricity_demand_kwh,
+                    "recommendation_goal": response.input.recommendation_goal.value,
+                    "latitude": response.input.latitude,
+                    "longitude": response.input.longitude,
+                }
+            },
+        )
     return response

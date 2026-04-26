@@ -9,6 +9,8 @@ from app.models.roof import (
     RoofGeometryAnalysisResponse,
     RoofOutline,
     RoofRegistrationResponse,
+    SolarLayoutOption,
+    SolarModulePreset,
     SelectedRoof,
     SimilarityTransform,
     TopDownRenderMetadata,
@@ -48,6 +50,29 @@ class FakeRoofGeometryPipelineService:
             status="analyzed",
             selected_roof=selected_roof,
             registration=registration,
+            solar_layout_options=[
+                SolarLayoutOption(
+                    id="better",
+                    strategy="demand_match",
+                    module=SolarModulePreset(
+                        id="standard",
+                        label="Standard 480 W glass-glass module",
+                        brand="Sunpro",
+                        model="SPDG480-N108R12",
+                        watt_peak=480,
+                        length_m=1.96,
+                        width_m=1.134,
+                        thickness_m=0.03,
+                        source_url="https://example.test/module.pdf",
+                    ),
+                    panel_count=12,
+                    system_size_kwp=5.76,
+                    estimated_annual_production_kwh=5200,
+                    annual_demand_kwh=5000,
+                    demand_coverage_ratio=1.04,
+                )
+            ],
+            recommended_layout_option_id="better",
             render_metadata=metadata,
             warnings=[],
         )
@@ -73,6 +98,8 @@ def test_roof_geometry_route_runs_from_selected_roof_ids_without_frontend_render
     assert payload["status"] == "analyzed"
     assert payload["selected_roof"]["selected_roof_outline_ids"] == ["roof-003"]
     assert payload["registration"]["status"] == "registered"
+    assert payload["recommended_layout_option_id"] == "better"
+    assert payload["solar_layout_options"][0]["module"]["id"] == "standard"
 
 
 def _selected_roof(request: RoofGeometryAnalysisRequest) -> SelectedRoof:

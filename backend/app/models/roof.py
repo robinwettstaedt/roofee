@@ -181,6 +181,40 @@ class RemovedRoofArea(BaseModel):
     area_m2: float = Field(ge=0)
 
 
+class SolarModulePreset(BaseModel):
+    id: str
+    label: str
+    brand: str
+    model: str
+    watt_peak: float = Field(gt=0)
+    length_m: float = Field(gt=0)
+    width_m: float = Field(gt=0)
+    thickness_m: float = Field(gt=0)
+    source_url: str
+
+
+class PanelPlacement(BaseModel):
+    id: str
+    roof_plane_id: str
+    usable_region_id: str
+    orientation: str
+    model_polygon: list[list[float]]
+    render_polygon_pixels: list[list[int]]
+
+
+class SolarLayoutOption(BaseModel):
+    id: str
+    strategy: str
+    module: SolarModulePreset
+    panel_count: int = Field(ge=0)
+    system_size_kwp: float = Field(ge=0)
+    estimated_annual_production_kwh: float | None = Field(default=None, ge=0)
+    annual_demand_kwh: float | None = Field(default=None, gt=0)
+    demand_coverage_ratio: float | None = Field(default=None, ge=0)
+    panel_placements: list[PanelPlacement] = Field(default_factory=list)
+    warnings: list[str] = Field(default_factory=list)
+
+
 class RoofGeometryAnalysisResponse(BaseModel):
     status: str
     selected_roof: SelectedRoof
@@ -190,5 +224,7 @@ class RoofGeometryAnalysisResponse(BaseModel):
     roof_planes: list[RoofPlaneGeometry] = Field(default_factory=list)
     usable_regions: list[UsableRoofRegion] = Field(default_factory=list)
     removed_areas: list[RemovedRoofArea] = Field(default_factory=list)
+    solar_layout_options: list[SolarLayoutOption] = Field(default_factory=list)
+    recommended_layout_option_id: str | None = None
     render_metadata: TopDownRenderMetadata
     warnings: list[str] = Field(default_factory=list)

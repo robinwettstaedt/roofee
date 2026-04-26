@@ -127,6 +127,11 @@ class HouseDataService:
             raise HTTPException(status_code=422, detail="House asset metadata is malformed.")
         return payload
 
+    def update_house_asset_metadata(self, asset_id: str, values: dict[str, Any]) -> None:
+        payload = self.house_asset_metadata(asset_id)
+        payload.update(values)
+        self._write_asset_metadata(asset_id, payload)
+
     def house_model_cache_path(self, asset_id: str) -> Path:
         return self._safe_asset_path(asset_id, "house.glb")
 

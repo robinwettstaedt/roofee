@@ -59,6 +59,11 @@ class FailingPvgisService:
 
 
 class FakeHouseDataService:
+    metadata_updates: list[tuple[str, dict[str, object]]]
+
+    def __init__(self) -> None:
+        self.metadata_updates = []
+
     def fetch_house_data(self, latitude: float, longitude: float) -> HouseData:
         center = LatLng(latitude=latitude, longitude=longitude)
         return HouseData(
@@ -70,6 +75,9 @@ class FakeHouseDataService:
             tiles_3d=Google3DTilesData(root_url="/api/google-3d-tiles/root.json", origin=center),
             warnings=[],
         )
+
+    def update_house_asset_metadata(self, asset_id: str, values: dict[str, object]) -> None:
+        self.metadata_updates.append((asset_id, values))
 
 
 class FailingHouseDataService:
@@ -96,6 +104,11 @@ class FakeRoofAnalysisService:
             roof_planes=[],
             warnings=[],
         )
+
+    def asset_id_from_overhead_url(self, url: str) -> str | None:
+        if url == "/api/house-assets/test-asset/overhead.png":
+            return "test-asset"
+        return None
 
 
 @pytest.fixture
@@ -242,6 +255,35 @@ def test_recommendation_route_accepts_multipart_without_model_file(client: TestC
     }
     assert {"field": "load_profile", "value": "H0", "reason": "defaulted"} in payload["estimated_inputs"]
     assert {"field": "shading_level", "value": "unknown", "reason": "not_provided"} in payload["estimated_inputs"]
+
+
+def test_recommendation_route_caches_project_context_for_geometry_flow() -> None:
+    house_data_service = FakeHouseDataService()
+    app.dependency_overrides[get_pvgis_service] = lambda: FakePvgisService()
+    app.dependency_overrides[get_house_data_service] = lambda: house_data_service
+    app.dependency_overrides[get_roof_analysis_service] = lambda: FakeRoofAnalysisService()
+    try:
+        response = TestClient(app).post(
+            "/api/recommendations",
+            files=multipart_request(valid_recommendation_payload()),
+        )
+    finally:
+        app.dependency_overrides.clear()
+
+    assert response.status_code == 200
+    assert house_data_service.metadata_updates == [
+        (
+            "test-asset",
+            {
+                "project_context": {
+                    "annual_electricity_demand_kwh": 4500,
+                    "recommendation_goal": "balanced",
+                    "latitude": 52.52,
+                    "longitude": 13.405,
+                }
+            },
+        )
+    ]
 
 
 def test_recommendation_route_accepts_valid_glb_model_file(client: TestClient) -> None:
