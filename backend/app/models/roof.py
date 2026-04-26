@@ -3,6 +3,8 @@ from typing import Any
 
 from pydantic import BaseModel, Field
 
+from app.models.bom import SystemRecommendationOption
+
 
 class RoofAnalysisStatus(StrEnum):
     ANALYZED = "analyzed"
@@ -226,5 +228,6 @@ class RoofGeometryAnalysisResponse(BaseModel):
     removed_areas: list[RemovedRoofArea] = Field(default_factory=list)
     solar_layout_options: list[SolarLayoutOption] = Field(default_factory=list)
     recommended_layout_option_id: str | None = None
+    system_options: list[SystemRecommendationOption] = Field(default_factory=list)
     render_metadata: TopDownRenderMetadata
     warnings: list[str] = Field(default_factory=list)

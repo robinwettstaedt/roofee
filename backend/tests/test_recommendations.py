@@ -271,19 +271,22 @@ def test_recommendation_route_caches_project_context_for_geometry_flow() -> None
         app.dependency_overrides.clear()
 
     assert response.status_code == 200
-    assert house_data_service.metadata_updates == [
-        (
-            "test-asset",
-            {
-                "project_context": {
-                    "annual_electricity_demand_kwh": 4500,
-                    "recommendation_goal": "balanced",
-                    "latitude": 52.52,
-                    "longitude": 13.405,
-                }
-            },
-        )
-    ]
+    assert len(house_data_service.metadata_updates) == 1
+    asset_id, metadata_update = house_data_service.metadata_updates[0]
+    assert asset_id == "test-asset"
+    project_context = metadata_update["project_context"]
+    assert isinstance(project_context, dict)
+    expected_context = {
+        "annual_electricity_demand_kwh": 4500,
+        "recommendation_goal": "balanced",
+        "battery_preference": "consider",
+        "heat_pump_preference": "consider",
+        "ev_charger_preference": "consider",
+        "latitude": 52.52,
+        "longitude": 13.405,
+    }
+    for key, value in expected_context.items():
+        assert project_context[key] == value
 
 
 def test_recommendation_route_accepts_valid_glb_model_file(client: TestClient) -> None:

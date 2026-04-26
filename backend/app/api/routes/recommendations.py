@@ -30,14 +30,17 @@ def create_recommendation(
     response.roof_analysis = roof_analysis_service.analyze_house(response.house_data, house_data_service)
     asset_id = roof_analysis_service.asset_id_from_overhead_url(response.house_data.overhead_image_url)
     if asset_id is not None:
+        input_payload = response.input.model_dump(mode="json")
         house_data_service.update_house_asset_metadata(
             asset_id,
             {
                 "project_context": {
-                    "annual_electricity_demand_kwh": response.input.annual_electricity_demand_kwh,
+                    **input_payload,
                     "recommendation_goal": response.input.recommendation_goal.value,
-                    "latitude": response.input.latitude,
-                    "longitude": response.input.longitude,
+                    "battery_preference": response.input.battery_preference.value,
+                    "heat_pump_preference": response.input.heat_pump_preference.value,
+                    "ev_charger_preference": response.input.ev_charger_preference.value,
+                    "shading_level": response.input.shading_level.value,
                 }
             },
         )

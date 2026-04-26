@@ -31,7 +31,7 @@ sequenceDiagram
     Backend->>Backend: ✅ Extract roof planes and usable regions
     Backend->>Backend: ✅ Check where panels can fit
     Backend->>Backend: ✅ Create good, better, and best options
-    Backend->>Backend: Create the BOM
+    Backend->>Backend: ✅ Create the BOM
     Backend->>Backend: Prepare the roof visual
     Backend-->>Frontend: Return proposal, BOM, warnings, and panel placement
     Frontend->>Frontend: Show proposal, BOM, warnings, and panel placement
@@ -389,6 +389,9 @@ sequenceDiagram
    - The backend converts the selected system sizes into contractor-ready line items.
    - The BOM uses only components from the fixed material catalog extracted from the provided datasets.
    - The BOM includes core equipment, accessories, mounting, services, and installation-related items.
+   - PV module line items use the backend-owned dimensioned panel presets from the feasible roof layouts because the CSV module rows do not include reliable physical dimensions.
+
+   ✅ Implemented: `POST /api/roof/geometry` now returns `system_options` alongside the feasible solar layouts. Each option preserves the selected roof-fit-constrained panel count, adds deterministic inverter, battery, heat pump, and wallbox sizing where project inputs allow it, and converts the result into catalog-backed BOM line items with assumptions and warnings. Heat pump fallbacks are explicitly marked as estimates, not DIN EN 12831 heat-load calculations.
 
 11. **Prepare the visual result**
    - The backend maps the selected panel layout back onto the best available roof geometry.
@@ -467,26 +470,28 @@ The backend is organized around service responsibilities rather than one large c
   - Calculates how many panels can physically fit and where they can go.
   - Produces feasible `good`, `better`, and `best` layouts with traceable panel placements and PVGIS-backed annual yield estimates when location data is available.
 
-Planned services that are referenced by the product flow but not implemented yet:
-
 - `EnergySizingService`
-  - Orchestrates the `good`, `better`, and `best` recommendations.
-  - Coordinates PV sizing, battery sizing, heat pump sizing, assumptions, warnings, and confidence.
-
-- `PvSizingService`
-  - Uses feasible solar layouts, customer demand, roof orientation, and PV yield data to choose target PV sizes.
+  - Wraps each feasible solar layout into a full system option.
+  - Keeps PV sizing anchored to the roof-fit-constrained layout result.
+  - Coordinates inverter, battery, heat pump, wallbox, assumptions, warnings, and BOM creation.
 
 - `BatterySizingService`
-  - Recommends whether a battery is useful and what capacity makes sense for the selected PV size and household demand.
+  - Recommends whether a battery belongs in the option and selects the nearest catalog-backed capacity.
+  - Uses explicit project preferences and V1 self-consumption heuristics.
 
 - `HeatPumpSizingService`
   - Uses known heating demand when available.
-  - Falls back to estimates from home size, construction class, occupants, and location when needed.
+  - Falls back to estimates from home size, renovation/build-year class, and warns that this is not a DIN EN 12831 heat-load calculation.
 
 - `BomService`
   - Converts a selected system option into BOM line items.
   - Selects only from catalog components.
   - Adds required accessories, mounting, services, and installation items.
+
+Planned services that are referenced by the product flow but not implemented yet:
+
+- `PvSizingService`
+  - Uses feasible solar layouts, customer demand, roof orientation, and PV yield data to choose target PV sizes when layouts need more strategy variants than the current good/better/best presets.
 
 - `PanelPlacementService`
   - Converts the selected solar layout into frontend-renderable geometry on the best available roof representation.
@@ -514,12 +519,12 @@ app/services/
     usable_geometry_service.py
     solar_layout_service.py
   sizing/
-    energy_sizing_service.py          # planned
+    energy_sizing_service.py
     pv_sizing_service.py              # planned
-    battery_sizing_service.py         # planned
-    heat_pump_sizing_service.py       # planned
+    battery_sizing_service.py
+    heat_pump_sizing_service.py
   bom/
-    bom_service.py                    # planned
+    bom_service.py
     component_selection_service.py    # planned
   pvgis_service.py
 ```

@@ -1,6 +1,8 @@
 from fastapi.testclient import TestClient
 
 from app.main import app
+from app.models.bom import BomLineItem, BomLineSource, BomSummary, EquipmentRole, SystemRecommendationOption
+from app.models.catalog import ComponentCategory, ComponentKind
 from app.models.roof import (
     BoundingBoxPixels,
     OrthographicWorldBounds,
@@ -73,6 +75,37 @@ class FakeRoofGeometryPipelineService:
                 )
             ],
             recommended_layout_option_id="better",
+            system_options=[
+                SystemRecommendationOption(
+                    id="system-better",
+                    layout_option_id="better",
+                    strategy="demand_match",
+                    panel_count=12,
+                    system_size_kwp=5.76,
+                    estimated_annual_production_kwh=5200,
+                    annual_demand_kwh=5000,
+                    demand_coverage_ratio=1.04,
+                    bom=[
+                        BomLineItem(
+                            id="panel-line",
+                            role=EquipmentRole.PV_MODULE,
+                            component_name="Standard 480 W glass-glass module",
+                            component_brand="Sunpro",
+                            component_type="PanelPreset",
+                            category=ComponentCategory.CORE_EQUIPMENT,
+                            kind=ComponentKind.PV_MODULE,
+                            quantity=12,
+                            quantity_units="Item",
+                            source=BomLineSource.PANEL_PRESET,
+                        )
+                    ],
+                    summary=BomSummary(
+                        line_item_count=1,
+                        panel_count=12,
+                        system_size_kwp=5.76,
+                    ),
+                )
+            ],
             render_metadata=metadata,
             warnings=[],
         )
@@ -100,6 +133,8 @@ def test_roof_geometry_route_runs_from_selected_roof_ids_without_frontend_render
     assert payload["registration"]["status"] == "registered"
     assert payload["recommended_layout_option_id"] == "better"
     assert payload["solar_layout_options"][0]["module"]["id"] == "standard"
+    assert payload["system_options"][0]["layout_option_id"] == "better"
+    assert payload["system_options"][0]["bom"][0]["source"] == "panel_preset"
 
 
 def _selected_roof(request: RoofGeometryAnalysisRequest) -> SelectedRoof:
